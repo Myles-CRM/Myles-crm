@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+<meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Myles CRM — Contacts</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Contacts</h1>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="notes.html">Notes</a>
+        <a href="contacts.html" class="active">Contacts</a>
+        <a href="calendar.html">Calendar</a>
+      </nav>
+    </header>
+    <main>
+      <form id="contactForm" class="card">
+<div class="grid">
+          <label>First Name<input name="firstName" required></label>
+          <label>Last Name<input name="lastName" required></label>
+          <label>Phone Number<input name="phone" type="tel"></label>
+          <label>Address<input name="address"></label>
+          <label>Email<input name="email" type="email"></label>
+          <label>Profession<input name="profession"></label>
+        </div>
+        <label>Notes<textarea name="notes" rows="4"></textarea></label>
+        <button type="submit">Add Contact</button>
+        <span id="formStatus"></span>
+      </form>
+
+      <section class="card">
+        <h2>Saved Contacts</h2>
+        <input id="search" placeholder="Search by name or email" />
+        <ul id="list" class="list"></ul>
+</section>
+    </main>
+    <footer>
+      <small>Contacts are stored locally in your browser on this device.</small>
+    </footer>
+    <script src="assets/common.js"></script>
+    <script>
+      const KEY='myles_contacts_v1';
+      const form=document.getElementById('contactForm');
+      const list=document.getElementById('list');
+      const formStatus=document.getElementById('formStatus');
+      const search=document.getElementById('search');
+
+      function load(){
+        try { return JSON.parse(localStorage.getItem(KEY))||[] } catch(e){ return [] }
+      }
+      function save(data){ localStorage.setItem(KEY, JSON.stringify(data)); }
+function render(filter=''){
+        const data=load();
+        const q=filter.toLowerCase();
+        list.innerHTML='';
+        data
+          .filter(c=>${c.firstName} ${c.lastName} ${c.email}.toLowerCase().includes(q))
+          .forEach((c,idx)=>{
+            const li=document.createElement('li');
+            li.innerHTML=<strong>${c.firstName} ${c.lastName}</strong><br>
+              ${c.email||''} ${c.phone? ' • '+c.phone: ''}<br>
+              ${c.address||''} ${c.profession? ' • '+c.profession: ''}<br>
+              <em>${c.notes||''}</em>
+              <div class="row"><button data-i="${idx}" class="del">Delete</button></div>;
+            list.appendChild(li);
+          });
+      }
+form.addEventListener('submit', (e)=>{
+        e.preventDefault();
+        const fd=new FormData(form);
+        const entry=Object.fromEntries(fd.entries());
+        const data=load();
+        data.push(entry);
+        save(data);
+        form.reset();
+        formStatus.textContent='Saved!';
+        setTimeout(()=>formStatus.textContent='',1500);
+        render(search.value);
+      });
+
+      list.addEventListener('click', (e)=>{
+        if(e.target.classList.contains('del')){
+          const i=+e.target.dataset.i;
+          const data=load();
+data.splice(i,1);
+          save(data);
+          render(search.value);
+        }
+      });
+
+      search.addEventListener('input', ()=>render(search.value));
+      render();
+    </script>
+  </body>
+</html>
