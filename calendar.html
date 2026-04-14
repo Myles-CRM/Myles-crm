@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+<meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Myles CRM — Calendar</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Calendar (Prototype)</h1>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="notes.html">Notes</a>
+        <a href="contacts.html">Contacts</a>
+        <a href="calendar.html" class="active">Calendar</a>
+      </nav>
+    </header>
+    <main>
+      <section class="card">
+<p>This is a placeholder calendar. Apple Calendar integration will come later.</p>
+        <div class="row">
+          <input id="eventTitle" placeholder="Event title" />
+          <input id="eventDate" type="date" />
+          <button id="addEvent">Add Event</button>
+        </div>
+        <ul id="events" class="list"></ul>
+      </section>
+    </main>
+    <footer>
+      <small>Events are stored locally in your browser on this device.</small>
+    </footer>
+    <script src="assets/common.js"></script>
+    <script>
+      const KEY='myles_events_v1';
+      const eventsEl=document.getElementById('events');
+      function load(){ try {return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return []}}
+function save(d){ localStorage.setItem(KEY, JSON.stringify(d)); }
+      function render(){
+        const items=load().sort((a,b)=>a.date.localeCompare(b.date));
+        eventsEl.innerHTML='';
+        items.forEach((ev,i)=>{
+          const li=document.createElement('li');
+          li.innerHTML=<strong>${ev.title}</strong> — ${ev.date} <button data-i="${i}" class="del">Delete</button>;
+          eventsEl.appendChild(li);
+        });
+      }
+      document.getElementById('addEvent').addEventListener('click',()=>{
+        const title=document.getElementById('eventTitle').value.trim();
+        const date=document.getElementById('eventDate').value;
+        if(!title||!date) return alert('Add a title and date');
+        const data=load();
+        data.push({title,date});
+        save(data);
+document.getElementById('eventTitle').value='';
+        document.getElementById('eventDate').value='';
+        render();
+      });
+      eventsEl.addEventListener('click',(e)=>{
+        if(e.target.classList.contains('del')){
+          const i=+e.target.dataset.i; const data=load(); data.splice(i,1); save(data); render();
+        }
+      });
+      render();
+    </script>
+  </body>
+</html>
