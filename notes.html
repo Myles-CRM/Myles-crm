@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Myles CRM — Notes</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Notes & Reminders</h1>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="notes.html" class="active">Notes</a>
+        <a href="contacts.html">Contacts</a>
+        <a href="calendar.html">Calendar</a>
+      </nav>
+    </header>
+    <main>
+      <div class="tabs">
+        <button class="tab active" data-tab="guitar">Guitar</button>
+        <button class="tab" data-tab="trumpet">Trumpet</button>
+<button class="tab" data-tab="bass">Bass</button>
+        <button class="tab" data-tab="drums">Drums</button>
+        <button class="tab" data-tab="piano">Piano</button>
+        <button class="tab" data-tab="general">General</button>
+      </div>
+      <section>
+        <textarea id="notesArea" rows="12" placeholder="Type your notes here..."></textarea>
+        <div class="row">
+          <button id="saveNotes">Save Notes</button>
+          <span id="status"></span>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <small>Notes are stored locally in your browser on this device.</small>
+    </footer>
+    <script src="assets/common.js"></script>
+<script>
+      const tabs = document.querySelectorAll('.tab');
+      const notesArea = document.getElementById('notesArea');
+      const statusEl = document.getElementById('status');
+
+      let currentTab = 'guitar';
+
+      function key(tab){ return myles_notes_${tab}; }
+
+      function load(tab){
+        currentTab = tab;
+        notesArea.value = localStorage.getItem(key(tab)) || '';
+        statusEl.textContent = Loaded ${tab} notes.;
+        tabs.forEach(t=>t.classList.toggle('active', t.dataset.tab===tab));
+      }
+
+      document.getElementById('saveNotes').addEventListener('click', ()=>{
+localStorage.setItem(key(currentTab), notesArea.value);
+        statusEl.textContent = 'Saved!';
+        setTimeout(()=>statusEl.textContent='',1500);
+      });
+
+      tabs.forEach(t=>t.addEventListener('click', ()=>load(t.dataset.tab)));
+
+      load('guitar');
+    </script>
+  </body>
+</html>
