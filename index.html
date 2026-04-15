@@ -8,11 +8,11 @@
   </head>
   <body>
     <header>
-      <h1>Myles CRM</h1>
+<h1>Myles CRM</h1>
       <nav>
         <a href="index.html" class="active">Home</a>
         <a href="notes.html">Notes</a>
-<a href="contacts.html">Contacts</a>
+        <a href="contacts.html">Contacts</a>
         <a href="calendar.html">Calendar</a>
       </nav>
     </header>
@@ -25,16 +25,23 @@
         <a class="card" href="contacts.html">
           <h2>Contacts</h2>
           <p>Add and manage contacts with all your fields.</p>
-        </a>
+</a>
         <a class="card" href="calendar.html">
           <h2>Calendar</h2>
-          <p>View placeholder calendar and add events (Apple Calendar integration later).</p>
-</a>
+          <p>Reads events from Supabase (Add via Buddy/API for now).</p>
+        </a>
       </section>
     </main>
     <footer>
-      <small>Prototype — hosted on Netlify. Data saved locally on your device.</small>
+      <small>Prototype — hosted on Netlify. Cloud data via Supabase.</small>
     </footer>
-    <script src="assets/common.js"></script>
+
+    <!-- START: Supabase config (set your values) -->
+    <script>
+      window.SUPABASE_URL = 'PASTE_YOUR_SUPABASE_URL_HERE';
+      window.SUPABASE_ANON = 'PASTE_YOUR_ANON_PUBLIC_KEY_HERE';
+    </script>
+    <!-- END: Supabase config -->
+<script src="assets/common.js"></script>
   </body>
 </html>
