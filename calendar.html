@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-<meta charset="utf-8" />
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Myles CRM — Calendar</title>
     <link rel="stylesheet" href="assets/style.css" />
@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>Calendar (Prototype)</h1>
-      <nav>
+<nav>
         <a href="index.html">Home</a>
         <a href="notes.html">Notes</a>
         <a href="contacts.html">Contacts</a>
@@ -18,55 +18,54 @@
     </header>
     <main>
       <section class="card">
-<p>This is a placeholder calendar. Apple Calendar integration will come later.</p>
+        <p>Reads events from Supabase. (Add via Buddy/API for now)</p>
         <div class="row">
-          <input id="eventTitle" placeholder="Event title" />
+          <input id="eventTitle" placeholder="Cloud-read enabled (add via Buddy/API)" />
           <input id="eventDate" type="date" />
-          <button id="addEvent">Add Event</button>
+          <button id="addEvent" disabled>Add Event</button>
         </div>
         <ul id="events" class="list"></ul>
       </section>
-    </main>
+</main>
     <footer>
-      <small>Events are stored locally in your browser on this device.</small>
+      <small>Cloud data via Supabase.</small>
     </footer>
-<script>
-  window.__SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co';
-  window.__SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYnpqZWlwcnJhdGJ5am5zYmdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxOTEwMTQsImV4cCI6MjA5MTc2NzAxNH0.cQ5Ty5c4PsFFhXlKT6smGusvzCqAGJeKMVej_aDYi6M';
-</script>
 
-<script src="assets/common.js"></script>
+    <!-- START: Supabase config (set your values) -->
     <script>
-      const KEY='myles_events_v1';
-      const eventsEl=document.getElementById('events');
-      function load(){ try {return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return []}}
-function save(d){ localStorage.setItem(KEY, JSON.stringify(d)); }
-      function render(){
-        const items=load().sort((a,b)=>a.date.localeCompare(b.date));
+      window.SUPABASE_URL = 'PASTE_YOUR_SUPABASE_URL_HERE';
+      window.SUPABASE_ANON = 'PASTE_YOUR_ANON_PUBLIC_KEY_HERE';
+    </script>
+    <!-- END: Supabase config -->
+
+    <script src="assets/common.js"></script>
+
+    <!-- START: Calendar cloud script -->
+    <script>
+      const eventsEl = document.getElementById('events');
+function renderLocalFallback(){
+        eventsEl.innerHTML = '<li>(No cloud data yet)</li>';
+      }
+
+      async function renderCloud(){
+        if (!window.supabase) { renderLocalFallback(); return; }
+        const { data, error } = await window.supabase
+          .from('events')
+          .select('*')
+          .is('deleted_at', null)
+          .order('date', { ascending: true });
+        if (error) { console.warn(error); renderLocalFallback(); return; }
         eventsEl.innerHTML='';
-        items.forEach((ev,i)=>{
+        data.forEach((ev)=>{
           const li=document.createElement('li');
-          li.innerHTML=<strong>${ev.title}</strong> — ${ev.date} <button data-i="${i}" class="del">Delete</button>;
-          eventsEl.appendChild(li);
+          const when = ev.time ? ${ev.date} ${ev.time} : ev.date;
+          li.textContent = ${ev.title} — ${when};
+eventsEl.appendChild(li);
         });
       }
-      document.getElementById('addEvent').addEventListener('click',()=>{
-        const title=document.getElementById('eventTitle').value.trim();
-        const date=document.getElementById('eventDate').value;
-        if(!title||!date) return alert('Add a title and date');
-        const data=load();
-        data.push({title,date});
-        save(data);
-document.getElementById('eventTitle').value='';
-        document.getElementById('eventDate').value='';
-        render();
-      });
-      eventsEl.addEventListener('click',(e)=>{
-        if(e.target.classList.contains('del')){
-          const i=+e.target.dataset.i; const data=load(); data.splice(i,1); save(data); render();
-        }
-      });
-      render();
+
+      renderCloud();
     </script>
+    <!-- END: Calendar cloud script -->
   </body>
 </html>
