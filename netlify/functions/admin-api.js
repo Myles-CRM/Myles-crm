@@ -8,14 +8,14 @@ exports.handler = async (event) => {
         'Access-Control-Allow-Headers': 'Authorization, Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
       },
-body: ''
+      body: ''
     };
   }
 
   const ok = (data) => ({
     statusCode: 200,
     headers: {
-      'Access-Control-Allow-Origin': '',
+'Access-Control-Allow-Origin': '',
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(data)
@@ -25,14 +25,14 @@ body: ''
     statusCode: code,
     headers: {
       'Access-Control-Allow-Origin': '',
-'Content-Type': 'application/json'
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({ error: msg })
   });
 
   try {
     // Auth check
-    const auth = event.headers.authorization  '';
+const auth = event.headers.authorization  '';
     const token = auth.replace(/^Bearer\s+/i, '');
     if (!token 
  token !== process.env.CRM_ADMIN_TOKEN) {
@@ -42,28 +42,35 @@ body: ''
     if (event.httpMethod !== 'POST') {
       return bad(405, 'Method not allowed');
     }
-const body = JSON.parse(event.body  '{}');
+
+    const body = JSON.parse(event.body || '{}');
     const action = body.action;
 
     // Supabase client (server-side)
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
-    if (action === 'add-event') {
+if (action === 'add-event') {
       const { title, date, time, location, created_by='Buddy' } = body;
-      if (!title 
- !date) return bad(400, 'title and date required');
-      const { data, error } = await supabase.from('events').insert([{ title, date, time, location, created_by }]).select().single();
+      if (!title || !date) return bad(400, 'title and date required');
+      const { data, error } = await supabase
+        .from('events')
+        .insert([{ title, date, time, location, created_by }])
+        .select()
+        .single();
       if (error) return bad(500, error.message);
       return ok({ message: 'event added', id: data.id });
     }
 
     if (action === 'add-note') {
       const { category, content, created_by='Buddy' } = body;
-const allowed = ['guitar','trumpet','bass','drums','piano','general'];
+      const allowed = ['guitar','trumpet','bass','drums','piano','general'];
       if (!allowed.includes(category)) return bad(400, 'invalid category');
       if (!content) return bad(400, 'content required');
-      const { data, error } = await supabase.from('notes').insert([{ category, content, created_by }]).select().single();
+const { data, error } = await supabase
+        .from('notes')
+        .insert([{ category, content, created_by }])
+        .select()
+        .single();
       if (error) return bad(500, error.message);
       return ok({ message: 'note added', id: data.id });
     }
@@ -71,23 +78,30 @@ const allowed = ['guitar','trumpet','bass','drums','piano','general'];
     if (action === 'add-contact') {
       const { first_name, last_name, phone, address, email, profession, notes, created_by='Buddy' } = body;
       if (!first_name || !last_name) return bad(400, 'first_name and last_name required');
-      const { data, error } = await supabase.from('contacts').insert([{ first_name, last_name, phone, address, email, profession, notes, created_by }]).select().single();
-      if (error) return bad(500, error.message);
+      const { data, error } = await supabase
+        .from('contacts')
+        .insert([{ first_name, last_name, phone, address, email, profession, notes, created_by }])
+        .select()
+        .single();
+if (error) return bad(500, error.message);
       return ok({ message: 'contact added', id: data.id });
     }
 
     if (action === 'delete-item') {
-const { table, id } = body;
+      const { table, id } = body;
       const allowedTables = ['events','notes','contacts'];
       if (!allowedTables.includes(table)) return bad(400, 'invalid table');
       if (!id) return bad(400, 'id required');
-      const { error } = await supabase.from(table).update({ deleted_at: new Date().toISOString() }).eq('id', id);
+      const { error } = await supabase
+        .from(table)
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id);
       if (error) return bad(500, error.message);
       return ok({ message: 'soft deleted', id });
     }
-
-    return bad(400, 'unknown action');
+return bad(400, 'unknown action');
   } catch (e) {
     return bad(500, e.message || 'server error');
   }
 };
+
