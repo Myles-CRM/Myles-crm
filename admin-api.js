@@ -66,8 +66,8 @@ function parsePathSuffix(path) {
   return path.substring(idx + marker.length); // e.g. "events"
 }
 
-function getAuthToken(headers) {
-  const auth = headers.authorization || headers.Authorization || "";
+function getAuthToken(headers = {}) {
+  const auth = (headers.authorization || headers.Authorization || "").toString();
   const m = auth.match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : null;
 }
