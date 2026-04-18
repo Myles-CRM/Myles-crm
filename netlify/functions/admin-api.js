@@ -33,15 +33,19 @@ exports.handler = async (event) => {
   });
 
   try {
-    // GET health check (no auth)
+    // GET health check → 405 per requirements
     if (event.httpMethod === 'GET') {
       return bad(405, 'Method not allowed');
     }
 
-    // Auth check
+    // Auth: accept either admin token or passcode
     const auth = (event.headers && (event.headers.authorization || event.headers.Authorization)) || '';
     const token = auth.replace(/^Bearer\s+/i, '');
-    if (!token || token !== process.env.CRM_ADMIN_TOKEN) {
+    const isAuthorized = !!token && (
+      token === process.env.CRM_ADMIN_TOKEN ||
+      token === process.env.CRM_ADMIN_PASSCODE
+    );
+    if (!isAuthorized) {
       return bad(401, 'Unauthorized');
     }
 
@@ -50,7 +54,15 @@ exports.handler = async (event) => {
     }
 
     const body = JSON.parse(event.body || '{}');
-    const action = body.action;
+    let action = body.action;
+
+    // Allow path-based shorthand: /admin/notes|contacts|events → map to action
+    const pathTail = (event.path || '').split('/').pop();
+    if (!action) {
+      if (pathTail === 'notes') action = 'add-note';
+      if (pathTail === 'contacts') action = 'add-contact';
+      if (pathTail === 'events') action = 'add-event';
+    }
 
     // Import Supabase ESM client
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
