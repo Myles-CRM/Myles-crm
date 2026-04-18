@@ -7,7 +7,7 @@ exports.handler = async (event) => {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
-},
+      },
       body: ''
     };
   }
@@ -24,25 +24,30 @@ exports.handler = async (event) => {
   const bad = (code, msg) => ({
     statusCode: code,
     headers: {
-'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': '*',
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ error: msg })
   });
 
   try {
+    // GET health check (no auth)
+    if (event.httpMethod === 'GET') {
+      return bad(405, 'Method not allowed');
+    }
+
     // Auth check
-    const auth = event.headers.authorization  '';
+    const auth = (event.headers && (event.headers.authorization || event.headers.Authorization)) || '';
     const token = auth.replace(/^Bearer\s+/i, '');
-    if (!token 
- token !== process.env.CRM_ADMIN_TOKEN) {
+    if (!token || token !== process.env.CRM_ADMIN_TOKEN) {
       return bad(401, 'Unauthorized');
     }
 
     if (event.httpMethod !== 'POST') {
       return bad(405, 'Method not allowed');
     }
-const body = JSON.parse(event.body  '{}');
+
+    const body = JSON.parse(event.body || '{}');
     const action = body.action;
 
     // Import Supabase ESM client
@@ -51,8 +56,7 @@ const body = JSON.parse(event.body  '{}');
 
     if (action === 'add-event') {
       const { title, date, time, location, created_by = 'Buddy' } = body;
-      if (!title 
- !date) return bad(400, 'title and date required');
+      if (!title || !date) return bad(400, 'title and date required');
       const { data, error } = await supabase
         .from('events')
         .insert([{ title, date, time, location, created_by }])
@@ -60,7 +64,7 @@ const body = JSON.parse(event.body  '{}');
         .single();
       if (error) return bad(500, error.message);
       return ok({ message: 'event added', id: data.id });
-}
+    }
 
     if (action === 'add-note') {
       const { category, content, created_by = 'Buddy' } = body;
@@ -77,7 +81,7 @@ const body = JSON.parse(event.body  '{}');
     }
 
     if (action === 'add-contact') {
-const { first_name, last_name, phone, address, email, profession, notes, created_by = 'Buddy' } = body;
+      const { first_name, last_name, phone, address, email, profession, notes, created_by = 'Buddy' } = body;
       if (!first_name || !last_name) return bad(400, 'first_name and last_name required');
       const { data, error } = await supabase
         .from('contacts')
@@ -94,7 +98,7 @@ const { first_name, last_name, phone, address, email, profession, notes, created
       if (!allowedTables.includes(table)) return bad(400, 'invalid table');
       if (!id) return bad(400, 'id required');
       const { error } = await supabase
-.from(table)
+        .from(table)
         .update({ deleted_at: new Date().toISOString() })
         .eq('id', id);
       if (error) return bad(500, error.message);
