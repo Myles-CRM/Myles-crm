@@ -64,8 +64,8 @@ exports.handler = async (event) => {
       if (pathTail === 'events') action = 'add-event';
     }
 
-    // Import Supabase ESM client
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    // Import Supabase client (local package)
+    const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
     if (action === 'add-event') {
