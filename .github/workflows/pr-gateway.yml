@@ -6,30 +6,32 @@ on:
       branch:
         description: 'Branch name for PR (e.g., feature/add-event-button)'
         required: true
-      patch_url:
-        description: 'Public URL to a .patch file from Andy'
+      file_path:
+        description: 'Path to create/update (e.g., test-gateway.txt)'
+        required: true
+      text:
+        description: 'Text to write into the file'
         required: true
 
 permissions:
   contents: write
   pull-requests: write
+
 jobs:
   open-pr:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch patch
-        run: curl -L "${{ github.event.inputs.patch_url }}" -o change.patch
-
-      - name: Apply patch and push
+      - name: Write file
         run: |
           git config user.name "Myles-Andy-bot"
           git config user.email "tacotrumpet001+andy@gmail.com"
           git checkout -b "${{ github.event.inputs.branch }}"
-          git apply --whitespace=fix change.patch
+          mkdir -p "$(dirname "${{ github.event.inputs.file_path }}")"
+          printf '%s\n' "${{ github.event.inputs.text }}" > "${{ github.event.inputs.file_path }}"
           git add -A
-          git commit -m "Patch from Andy: ${{ github.event.inputs.branch }}"
+          git commit -m "Gateway write: ${{ github.event.inputs.file_path }}"
           git push -u origin "${{ github.event.inputs.branch }}"
 
       - name: Open PR
@@ -37,6 +39,6 @@ jobs:
         with:
           token: ${{ github.token }}
           branch: ${{ github.event.inputs.branch }}
-          title: "Patch from Andy: ${{ github.event.inputs.branch }}"
+          title: "Gateway: ${{ github.event.inputs.file_path }}"
           base: main
-          body: "Automated PR from Andy’s patch."
+          body: "Automated PR via PR Gateway."
