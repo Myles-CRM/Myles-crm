@@ -1,0 +1,46 @@
+name: PR Gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch name for PR (e.g., feature/add-event-button)'
+        required: true
+      patch_url:
+        description: 'Public URL to a .patch file from Andy'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PR_GATEWAY_PAT }}
+
+      - name: Fetch patch
+        run: curl -L "${{ github.event.inputs.patch_url }}" -o change.patch
+
+      - name: Apply patch and push
+        run: |
+          git config user.name "Myles-Andy-bot"
+          git config user.email "tacotrumpet001+andy@gmail.com"
+          git checkout -b "${{ github.event.inputs.branch }}"
+          git apply --whitespace=fix change.patch
+          git add -A
+          git commit -m "Patch from Andy: ${{ github.event.inputs.branch }}"
+          git push -u origin "${{ github.event.inputs.branch }}"
+        env:
+          GIT_ASKPASS: /bin/true
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.PR_GATEWAY_PAT }}
+          branch: ${{ github.event.inputs.branch }}
+          title: "Patch from Andy: ${{ github.event.inputs.branch }}"
+          base: main
+          body: "Automated PR from Andy’s patch."
