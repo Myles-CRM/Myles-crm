@@ -71,7 +71,7 @@ if (!window.supabase) {
         }
         const latest = data.length ? data[data.length-1].content : '';
 notesArea.value = latest;
-        statusEl.textContent = Loaded ${tab} notes (${data.length}).;
+        statusEl.textContent = `Loaded ${tab} notes (${data.length}).`;
       }
 
       tabs.forEach(t=>t.addEventListener('click', ()=>{
