@@ -278,10 +278,32 @@
         return parsedEvents;
       }
 
+      async function fetchCalendarText(feed) {
+        const encodedUrl = encodeURIComponent(feed.url);
+        const importEndpoints = [
+          `/api/calendar-import?url=${encodedUrl}`,
+          `/.netlify/functions/calendar-import?url=${encodedUrl}`,
+        ];
+
+        let lastError = null;
+        for (const endpoint of importEndpoints) {
+          try {
+            const response = await fetch(endpoint, { cache: 'no-store' });
+            if (!response.ok) {
+              lastError = new Error(`Calendar importer returned ${response.status}`);
+              continue;
+            }
+            return response.text();
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError || new Error('Calendar importer did not respond');
+      }
+
       async function refreshCalendarFeed(feed) {
-        const response = await fetch(feed.url, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`Calendar link returned ${response.status}`);
-        const icsText = await response.text();
+        const icsText = await fetchCalendarText(feed);
         const events = parseICalEvents(icsText, feed);
         return {
           ...feed,
@@ -316,7 +338,7 @@
             console.warn('Could not refresh calendar feed', error);
             refreshedFeeds.push({
               ...feed,
-              status: 'Could not refresh. Check the link or try exporting an iCal/ICS link.',
+              status: 'Could not refresh through the site importer. Check the link and try again.',
             });
           }
         }
