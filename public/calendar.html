@@ -70,13 +70,15 @@
                   <label>Ends<input id="eventEndDate" type="date" /></label>
                   <label>Time<input id="eventEndTime" type="time" /></label>
                 </div>
-                <label>Travel Time
-                  <select id="eventTravelTime">
+                <label>Reminder
+                  <select id="eventReminder">
                     <option value="none">None</option>
-                    <option value="5 minutes">5 minutes</option>
-                    <option value="15 minutes">15 minutes</option>
-                    <option value="30 minutes">30 minutes</option>
-                    <option value="1 hour">1 hour</option>
+                    <option value="at time">At time of event</option>
+                    <option value="5 minutes before">5 minutes before</option>
+                    <option value="15 minutes before">15 minutes before</option>
+                    <option value="30 minutes before">30 minutes before</option>
+                    <option value="1 hour before">1 hour before</option>
+                    <option value="1 day before">1 day before</option>
                   </select>
                 </label>
                 <label>Repeat
@@ -91,9 +93,9 @@
                 <label>Linked contacts
                   <select id="eventContacts" multiple size="4"></select>
                 </label>
-                <button id="addEvent" type="button">Add to this browser</button>
+                <button id="addEvent" type="button">Add Event</button>
               </div>
-              <p class="hint">Quick add saves on this device for now. Link contacts to remember who is involved.</p>
+              <p id="eventSaveStatus" class="hint">Events save to Supabase when cloud saving is available, with this device as a backup.</p>
             </div>
           </aside>
         </div>
@@ -154,10 +156,11 @@
       const eventEndTime = document.getElementById('eventEndTime');
       const eventLocation = document.getElementById('eventLocation');
       const eventAllDay = document.getElementById('eventAllDay');
-      const eventTravelTime = document.getElementById('eventTravelTime');
+      const eventReminder = document.getElementById('eventReminder');
       const eventRepeat = document.getElementById('eventRepeat');
       const eventContacts = document.getElementById('eventContacts');
       const addEventButton = document.getElementById('addEvent');
+      const eventSaveStatus = document.getElementById('eventSaveStatus');
       const calendarImportUrl = document.getElementById('calendarImportUrl');
       const addCalendarFeedButton = document.getElementById('addCalendarFeed');
       const refreshImportsButton = document.getElementById('refreshImports');
@@ -171,6 +174,7 @@
       const calendarFeedsKey = 'myles-crm-calendar-feeds';
       const localContactsKey = 'myles-crm-contacts';
       const importRefreshHour = 5;
+      const reminderEmailAddress = 'tacotrumpet001@gmail.com';
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
       const agendaDateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'long', year: 'numeric' });
@@ -206,8 +210,11 @@
           endTime: event.endTime || '',
           allDay: Boolean(event.allDay),
           location: event.location || '',
-          travelTime: event.travelTime || 'none',
+          reminder: event.reminder || 'none',
+          reminderEmail: event.reminderEmail || '',
           repeat: event.repeat || 'never',
+          cloudEventId: event.cloudEventId ? String(event.cloudEventId) : '',
+          isCloudMeta: Boolean(event.isCloudMeta),
           linkedContactIds: Array.isArray(event.linkedContactIds) ? event.linkedContactIds.map(String) : [],
           source,
           sourceName: event.sourceName || '',
@@ -522,6 +529,25 @@
         return (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
       }
 
+      async function saveCloudEvent(event) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+
+        const { data, error } = await window.supabase
+          .from('events')
+          .insert([{
+            title: event.title,
+            date: event.date,
+            time: event.time,
+            location: event.location,
+            created_by: 'Myles',
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        return normaliseEvent(data, 'cloud');
+      }
+
       function getSourceLabel(event) {
         if (event.source === 'cloud') return 'Cloud';
         if (event.source === 'import') return event.sourceName || 'Import';
@@ -556,7 +582,10 @@
         if (!okToDelete) return;
 
         try {
-          if (event.source === 'cloud') await deleteCloudEvent(event);
+          if (event.source === 'cloud') {
+            await deleteCloudEvent(event);
+            saveLocalEvents(loadLocalEvents().filter((savedEvent) => savedEvent.cloudEventId !== String(event.id)));
+          }
           if (event.source === 'local') deleteLocalEvent(event);
           if (event.source === 'import') hideImportedEvent(event);
           await refreshEvents();
@@ -686,7 +715,7 @@
 
           const extraDetails = [];
           if (event.allDay) extraDetails.push('All-day');
-          if (event.travelTime && event.travelTime !== 'none') extraDetails.push(`Travel ${event.travelTime}`);
+          if (event.reminder && event.reminder !== 'none') extraDetails.push(`Reminder ${event.reminder} → ${event.reminderEmail || reminderEmailAddress}`);
           if (event.repeat && event.repeat !== 'never') extraDetails.push(`Repeats ${event.repeat}`);
           const linkedNames = getLinkedContactNames(event);
           if (linkedNames.length) extraDetails.push(`With ${linkedNames.join(', ')}`);
@@ -734,12 +763,26 @@
           Promise.resolve(loadLocalEvents()),
           Promise.resolve(loadImportedEvents()),
         ]);
-        events = [...cloudEvents, ...localEvents, ...importedEvents];
+        const localMetaByCloudId = new Map(
+          localEvents
+            .filter((event) => event.isCloudMeta && event.cloudEventId)
+            .map((event) => [event.cloudEventId, event])
+        );
+        const mergedCloudEvents = cloudEvents.map((event) => {
+          const meta = localMetaByCloudId.get(String(event.id));
+          return meta ? { ...event, ...meta, id: event.id, source: 'cloud' } : event;
+        });
+        const cloudEventIds = new Set(mergedCloudEvents.map((event) => String(event.id)));
+        const pendingCloudMetaEvents = localEvents
+          .filter((event) => event.isCloudMeta && event.cloudEventId && !cloudEventIds.has(event.cloudEventId))
+          .map((event) => ({ ...event, id: event.cloudEventId, source: 'cloud' }));
+        const visibleLocalEvents = localEvents.filter((event) => !event.isCloudMeta);
+        events = [...mergedCloudEvents, ...pendingCloudMetaEvents, ...visibleLocalEvents, ...importedEvents];
         renderCalendar();
         renderSelectedDay();
       }
 
-      addEventButton.addEventListener('click', () => {
+      addEventButton.addEventListener('click', async () => {
         const title = eventTitle.value.trim();
         const date = eventDate.value || selectedDate;
         const time = eventAllDay.checked ? '' : eventTime.value;
@@ -750,8 +793,7 @@
 
         if (!title || !date) return;
 
-        const localEvents = loadLocalEvents();
-        localEvents.push({
+        const eventDraft = {
           id: `local-${Date.now()}`,
           title,
           date,
@@ -760,11 +802,32 @@
           endTime,
           allDay: eventAllDay.checked,
           location,
-          travelTime: eventTravelTime.value,
+          reminder: eventReminder.value,
+          reminderEmail: eventReminder.value === 'none' ? '' : reminderEmailAddress,
           repeat: eventRepeat.value,
           linkedContactIds,
-        });
-        saveLocalEvents(localEvents);
+        };
+
+        addEventButton.disabled = true;
+        eventSaveStatus.textContent = 'Saving event…';
+        const localEvents = loadLocalEvents();
+
+        try {
+          const cloudEvent = await saveCloudEvent(eventDraft);
+          localEvents.push({
+            ...eventDraft,
+            id: `cloud-meta-${cloudEvent.id}`,
+            cloudEventId: String(cloudEvent.id),
+            isCloudMeta: true,
+          });
+          saveLocalEvents(localEvents);
+          eventSaveStatus.textContent = 'Saved to Supabase. Reminder details are saved in your CRM, but email sending still needs mail setup.';
+        } catch (error) {
+          console.warn('Could not save event to Supabase', error);
+          localEvents.push(eventDraft);
+          saveLocalEvents(localEvents);
+          eventSaveStatus.textContent = 'Saved on this device. Supabase saving was not available.';
+        }
 
         eventTitle.value = '';
         eventTime.value = '';
@@ -772,11 +835,14 @@
         eventEndTime.value = '';
         eventLocation.value = '';
         eventAllDay.checked = false;
-        eventTravelTime.value = 'none';
+        eventTime.disabled = false;
+        eventEndTime.disabled = false;
+        eventReminder.value = 'none';
         eventRepeat.value = 'never';
         Array.from(eventContacts.options).forEach((option) => { option.selected = false; });
         selectedDate = date;
         visibleMonth = startOfMonth(parseDateKey(date));
+        addEventButton.disabled = false;
         refreshEvents();
       });
 
