@@ -548,6 +548,58 @@
         return normaliseEvent(data, 'cloud');
       }
 
+      function getReminderDueAt(event) {
+        if (!event.reminder || event.reminder === 'none') return '';
+
+        const eventTime = event.time || '09:00';
+        const eventDateTime = new Date(`${event.date}T${eventTime}`);
+        if (Number.isNaN(eventDateTime.getTime())) return '';
+
+        const offsets = {
+          'at time': 0,
+          '5 minutes before': 5,
+          '15 minutes before': 15,
+          '30 minutes before': 30,
+          '1 hour before': 60,
+          '1 day before': 24 * 60,
+        };
+        const minutesBefore = offsets[event.reminder];
+        if (minutesBefore === undefined) return '';
+
+        return new Date(eventDateTime.getTime() - minutesBefore * 60 * 1000).toISOString();
+      }
+
+      async function saveCloudReminder(event, cloudEvent) {
+        if (!window.supabase || !event.reminder || event.reminder === 'none') return { saved: false, skipped: true };
+
+        const dueAt = getReminderDueAt(event);
+        if (!dueAt) throw new Error('Could not calculate reminder time.');
+
+        const { error } = await window.supabase
+          .from('event_reminders')
+          .insert([{
+            event_id: String(cloudEvent.id),
+            event_title: event.title,
+            event_date: event.date,
+            event_time: event.time || null,
+            event_location: event.location || null,
+            reminder: event.reminder,
+            due_at: dueAt,
+            email: event.reminderEmail || reminderEmailAddress,
+          }]);
+
+        if (error) throw error;
+        return { saved: true, dueAt };
+      }
+
+      async function deleteCloudReminders(event) {
+        if (!window.supabase) return;
+        await window.supabase
+          .from('event_reminders')
+          .delete()
+          .eq('event_id', String(event.id));
+      }
+
       function getSourceLabel(event) {
         if (event.source === 'cloud') return 'Cloud';
         if (event.source === 'import') return event.sourceName || 'Import';
@@ -584,6 +636,7 @@
         try {
           if (event.source === 'cloud') {
             await deleteCloudEvent(event);
+            await deleteCloudReminders(event);
             saveLocalEvents(loadLocalEvents().filter((savedEvent) => savedEvent.cloudEventId !== String(event.id)));
           }
           if (event.source === 'local') deleteLocalEvent(event);
@@ -814,6 +867,12 @@
 
         try {
           const cloudEvent = await saveCloudEvent(eventDraft);
+          let reminderResult = { saved: false, skipped: true };
+          try {
+            reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
+          } catch (reminderError) {
+            console.warn('Could not save reminder row', reminderError);
+          }
           localEvents.push({
             ...eventDraft,
             id: `cloud-meta-${cloudEvent.id}`,
@@ -821,7 +880,13 @@
             isCloudMeta: true,
           });
           saveLocalEvents(localEvents);
-          eventSaveStatus.textContent = 'Saved to Supabase. Reminder details are saved in your CRM, but email sending still needs mail setup.';
+          if (eventDraft.reminder !== 'none' && reminderResult.saved) {
+            eventSaveStatus.textContent = 'Saved to Supabase. Email reminder is queued.';
+          } else if (eventDraft.reminder !== 'none') {
+            eventSaveStatus.textContent = 'Saved to Supabase. Reminder needs the event_reminders table before emails can send.';
+          } else {
+            eventSaveStatus.textContent = 'Saved to Supabase.';
+          }
         } catch (error) {
           console.warn('Could not save event to Supabase', error);
           localEvents.push(eventDraft);
