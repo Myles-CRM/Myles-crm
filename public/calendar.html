@@ -82,7 +82,7 @@
           <input id="calendarImportUrl" placeholder="Paste a Daymap / iCal / .ics calendar link" autocomplete="off" />
           <button id="addCalendarFeed" type="button">Add calendar link</button>
         </div>
-        <p id="importStatus" class="hint">Imported calendars auto-refresh while this page is open.</p>
+        <p id="importStatus" class="hint">Imported calendars auto-refresh every day at 5:00 AM while this page is open.</p>
         <ul id="importCalendarsList" class="calendar-feed-list"></ul>
       </section>
 
@@ -134,7 +134,7 @@
 
       const localStorageKey = 'myles-crm-calendar-events';
       const calendarFeedsKey = 'myles-crm-calendar-feeds';
-      const importRefreshMinutes = 15;
+      const importRefreshHour = 5;
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
       const agendaDateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'long', year: 'numeric' });
@@ -168,6 +168,7 @@
           location: event.location || '',
           source,
           sourceName: event.sourceName || '',
+          hidden: Boolean(event.hidden),
         };
       }
 
@@ -199,7 +200,9 @@
 
       function loadImportedEvents() {
         return loadCalendarFeeds().flatMap((feed) =>
-          (feed.events || []).map((event) => normaliseEvent({ ...event, sourceName: feed.name }, 'import'))
+          (feed.events || [])
+            .filter((event) => !event.hidden)
+            .map((event) => normaliseEvent({ ...event, sourceName: feed.name }, 'import'))
         );
       }
 
@@ -304,12 +307,16 @@
 
       async function refreshCalendarFeed(feed) {
         const icsText = await fetchCalendarText(feed);
-        const events = parseICalEvents(icsText, feed);
+        const hiddenEventIds = new Set((feed.events || []).filter((event) => event.hidden).map((event) => event.id));
+        const events = parseICalEvents(icsText, feed).map((event) => ({
+          ...event,
+          hidden: hiddenEventIds.has(event.id),
+        }));
         return {
           ...feed,
           events,
           updatedAt: new Date().toISOString(),
-          status: `Updated ${events.length} event${events.length === 1 ? '' : 's'}`,
+          status: `Updated ${events.filter((event) => !event.hidden).length} event${events.filter((event) => !event.hidden).length === 1 ? '' : 's'}`,
         };
       }
 
@@ -325,7 +332,9 @@
 
         for (const feed of feeds) {
           const lastUpdated = feed.updatedAt ? new Date(feed.updatedAt).getTime() : 0;
-          const dueForRefresh = force || !lastUpdated || now - lastUpdated > importRefreshMinutes * 60 * 1000;
+          const todayRefreshTime = new Date();
+          todayRefreshTime.setHours(importRefreshHour, 0, 0, 0);
+          const dueForRefresh = force || !lastUpdated || (now >= todayRefreshTime.getTime() && lastUpdated < todayRefreshTime.getTime());
 
           if (!dueForRefresh) {
             refreshedFeeds.push(feed);
@@ -344,7 +353,7 @@
         }
 
         saveCalendarFeeds(refreshedFeeds);
-        importStatus.textContent = `Imported calendars refresh every ${importRefreshMinutes} minutes while this page is open.`;
+        importStatus.textContent = 'Imported calendars auto-refresh once per day at 5:00 AM while this page is open.';
         renderCalendarFeeds();
       }
 
@@ -403,6 +412,44 @@
         if (event.source === 'cloud') return 'Cloud';
         if (event.source === 'import') return event.sourceName || 'Import';
         return 'Local';
+      }
+
+      async function deleteCloudEvent(event) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+        const { error } = await window.supabase
+          .from('events')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('id', event.id);
+        if (error) throw error;
+      }
+
+      function deleteLocalEvent(event) {
+        saveLocalEvents(loadLocalEvents().filter((savedEvent) => savedEvent.id !== event.id));
+      }
+
+      function hideImportedEvent(event) {
+        const feeds = loadCalendarFeeds().map((feed) => ({
+          ...feed,
+          events: (feed.events || []).map((savedEvent) =>
+            savedEvent.id === event.id ? { ...savedEvent, hidden: true } : savedEvent
+          ),
+        }));
+        saveCalendarFeeds(feeds);
+      }
+
+      async function deleteEvent(event) {
+        const okToDelete = confirm(`Delete ${event.title}?`);
+        if (!okToDelete) return;
+
+        try {
+          if (event.source === 'cloud') await deleteCloudEvent(event);
+          if (event.source === 'local') deleteLocalEvent(event);
+          if (event.source === 'import') hideImportedEvent(event);
+          await refreshEvents();
+        } catch (error) {
+          console.warn('Could not delete calendar event', error);
+          alert('Could not delete that event yet.');
+        }
       }
 
       function getEventsForDay(dateKey) {
@@ -519,7 +566,13 @@
           source.className = `source-pill ${event.source}`;
           source.textContent = getSourceLabel(event);
 
-          item.append(time, eventDetails, source);
+          const deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.className = 'delete-button';
+          deleteButton.textContent = 'Delete';
+          deleteButton.addEventListener('click', () => deleteEvent(event));
+
+          item.append(time, eventDetails, source, deleteButton);
           container.appendChild(item);
         });
       }
@@ -630,10 +683,24 @@
         renderSelectedDay();
       });
 
+      function getNextDailyRefreshDelay() {
+        const now = new Date();
+        const nextRefresh = new Date(now);
+        nextRefresh.setHours(importRefreshHour, 0, 0, 0);
+        if (nextRefresh <= now) nextRefresh.setDate(nextRefresh.getDate() + 1);
+        return nextRefresh.getTime() - now.getTime();
+      }
+
+      function scheduleNextDailyImportRefresh() {
+        setTimeout(async () => {
+          await refreshEvents();
+          scheduleNextDailyImportRefresh();
+        }, getNextDailyRefreshDelay());
+      }
+
       eventDate.value = selectedDate;
       renderCalendarFeeds();
-      refreshEvents();
-      setInterval(refreshEvents, importRefreshMinutes * 60 * 1000);
+      refreshEvents().then(scheduleNextDailyImportRefresh);
     </script>
     <!-- END: Calendar cloud script -->
   </body>
