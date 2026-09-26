@@ -8,63 +8,348 @@
   </head>
   <body>
     <header>
-      <h1>Calendar (Prototype)</h1>
-<nav>
+      <h1>Calendar</h1>
+      <nav>
         <a href="index.html">Home</a>
         <a href="notes.html">Notes</a>
         <a href="contacts.html">Contacts</a>
         <a href="calendar.html" class="active">Calendar</a>
       </nav>
     </header>
-    <main>
-      <section class="card">
-        <p>Reads events from Supabase. (Add via Buddy/API for now)</p>
-        <div class="row">
-          <input id="eventTitle" placeholder="Cloud-read enabled (add via Buddy/API)" />
-          <input id="eventDate" type="date" />
-          <button id="addEvent" disabled>Add Event</button>
+
+    <main class="calendar-page">
+      <section class="calendar-shell card">
+        <div class="calendar-toolbar">
+          <div>
+            <p class="eyebrow">Monthly schedule</p>
+            <h2 id="monthTitle">Month</h2>
+          </div>
+          <div class="calendar-actions" aria-label="Calendar controls">
+            <button id="prevMonth" type="button" class="secondary-button" aria-label="Previous month">‹</button>
+            <button id="todayButton" type="button" class="secondary-button">Today</button>
+            <button id="nextMonth" type="button" class="secondary-button" aria-label="Next month">›</button>
+          </div>
         </div>
-        <ul id="events" class="list"></ul>
+
+        <div class="calendar-layout">
+          <div class="month-panel" aria-label="Month view calendar">
+            <div class="weekday-row" aria-hidden="true">
+              <span>Sun</span>
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+            </div>
+            <div id="monthGrid" class="month-grid"></div>
+          </div>
+
+          <aside class="schedule-panel" aria-label="Selected day schedule">
+            <div class="selected-day-card">
+              <p class="eyebrow">Selected day</p>
+              <h3 id="selectedDayTitle">Today</h3>
+              <ul id="selectedDayEvents" class="schedule-list"></ul>
+            </div>
+
+            <div class="quick-add-card">
+              <p class="eyebrow">Quick add</p>
+              <h3>Add an event</h3>
+              <div class="stacked-form">
+                <input id="eventTitle" placeholder="Event title" autocomplete="off" />
+                <div class="two-column-form">
+                  <input id="eventDate" type="date" />
+                  <input id="eventTime" type="time" />
+                </div>
+                <button id="addEvent" type="button">Add to this browser</button>
+              </div>
+              <p class="hint">Quick add saves on this device for now. Cloud events still load from Supabase when available.</p>
+            </div>
+          </aside>
+        </div>
       </section>
-</main>
+
+      <section class="card month-agenda-card">
+        <div class="calendar-toolbar compact">
+          <div>
+            <p class="eyebrow">This month</p>
+            <h2>Upcoming events</h2>
+          </div>
+        </div>
+        <ul id="monthAgenda" class="schedule-list wide"></ul>
+      </section>
+    </main>
+
     <footer>
-      <small>Cloud data via Supabase.</small>
+      <small>Cloud data via Supabase. Local quick-add events stay on this device.</small>
     </footer>
 
     <!-- START: Supabase config (set your values) -->
     <script>
       window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';
-      window.SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYnpqZWlwcnJhdGJ5am5zYmdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxOTEwMTQsImV4cCI6MjA5MTc2NzAxNH0.cQ5Ty5c4PsFFhXlKT6smGusvzCqAGJeKMVej_aDYi6M';
+      window.SUPABASE_ANON = 'eyJhbG…Yi6M';
     </script>
     <!-- END: Supabase config -->
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="assets/common.js"></script>
 
     <!-- START: Calendar cloud script -->
     <script>
-      const eventsEl = document.getElementById('events');
-function renderLocalFallback(){
-        eventsEl.innerHTML = '<li>(No cloud data yet)</li>';
+      const monthTitle = document.getElementById('monthTitle');
+      const monthGrid = document.getElementById('monthGrid');
+      const monthAgenda = document.getElementById('monthAgenda');
+      const selectedDayTitle = document.getElementById('selectedDayTitle');
+      const selectedDayEvents = document.getElementById('selectedDayEvents');
+      const eventTitle = document.getElementById('eventTitle');
+      const eventDate = document.getElementById('eventDate');
+      const eventTime = document.getElementById('eventTime');
+      const addEventButton = document.getElementById('addEvent');
+      const prevMonthButton = document.getElementById('prevMonth');
+      const nextMonthButton = document.getElementById('nextMonth');
+      const todayButton = document.getElementById('todayButton');
+
+      const localStorageKey = 'myles-crm-calendar-events';
+      const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+      const agendaDateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+      const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'long', year: 'numeric' });
+
+      let visibleMonth = startOfMonth(new Date());
+      let selectedDate = toDateKey(new Date());
+      let events = [];
+
+      function startOfMonth(date) {
+        return new Date(date.getFullYear(), date.getMonth(), 1);
       }
 
-      async function renderCloud(){
-        if (!window.supabase) { renderLocalFallback(); return; }
+      function toDateKey(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      function parseDateKey(dateKey) {
+        const [year, month, day] = dateKey.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      }
+
+      function normaliseEvent(event, source) {
+        return {
+          id: event.id || `${source}-${event.title}-${event.date}-${event.time || 'all-day'}`,
+          title: event.title || 'Untitled event',
+          date: event.date,
+          time: event.time || '',
+          source,
+        };
+      }
+
+      function loadLocalEvents() {
+        try {
+          return JSON.parse(localStorage.getItem(localStorageKey) || '[]').map((event) => normaliseEvent(event, 'local'));
+        } catch (error) {
+          console.warn('Could not read local calendar events', error);
+          return [];
+        }
+      }
+
+      function saveLocalEvents(localEvents) {
+        localStorage.setItem(localStorageKey, JSON.stringify(localEvents));
+      }
+
+      async function loadCloudEvents() {
+        if (!window.supabase) return [];
+
         const { data, error } = await window.supabase
           .from('events')
           .select('*')
           .is('deleted_at', null)
-          .order('date', { ascending: true });
-        if (error) { console.warn(error); renderLocalFallback(); return; }
-        eventsEl.innerHTML='';
-        data.forEach((ev)=>{
-          const li=document.createElement('li');
-          const when = ev.time ? ${ev.date} ${ev.time} : ev.date;
-          li.textContent = ${ev.title} — ${when};
-eventsEl.appendChild(li);
+          .order('date', { ascending: true })
+          .order('time', { ascending: true });
+
+        if (error) {
+          console.warn('Could not load cloud calendar events', error);
+          return [];
+        }
+
+        return (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
+      }
+
+      function getEventsForDay(dateKey) {
+        return events
+          .filter((event) => event.date === dateKey)
+          .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+      }
+
+      function getVisibleMonthEvents() {
+        const month = visibleMonth.getMonth();
+        const year = visibleMonth.getFullYear();
+
+        return events
+          .filter((event) => {
+            const date = parseDateKey(event.date);
+            return date.getMonth() === month && date.getFullYear() === year;
+          })
+          .sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`));
+      }
+
+      function renderCalendar() {
+        monthTitle.textContent = monthFormatter.format(visibleMonth);
+        monthGrid.innerHTML = '';
+
+        const firstDay = new Date(visibleMonth);
+        const gridStart = new Date(firstDay);
+        gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+
+        for (let index = 0; index < 42; index += 1) {
+          const date = new Date(gridStart);
+          date.setDate(gridStart.getDate() + index);
+          const dateKey = toDateKey(date);
+          const dayEvents = getEventsForDay(dateKey);
+          const dayButton = document.createElement('button');
+          dayButton.type = 'button';
+          dayButton.className = 'calendar-day';
+          dayButton.dataset.date = dateKey;
+          dayButton.setAttribute('aria-label', `${dateFormatter.format(date)}: ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`);
+
+          if (date.getMonth() !== visibleMonth.getMonth()) dayButton.classList.add('muted-day');
+          if (dateKey === toDateKey(new Date())) dayButton.classList.add('today-day');
+          if (dateKey === selectedDate) dayButton.classList.add('selected-day');
+
+          const dateNumber = document.createElement('span');
+          dateNumber.className = 'date-number';
+          dateNumber.textContent = date.getDate();
+          dayButton.appendChild(dateNumber);
+
+          const chips = document.createElement('div');
+          chips.className = 'event-chips';
+          dayEvents.slice(0, 3).forEach((event) => {
+            const chip = document.createElement('span');
+            chip.className = 'event-chip';
+            chip.textContent = event.time ? `${event.time} ${event.title}` : event.title;
+            chips.appendChild(chip);
+          });
+
+          if (dayEvents.length > 3) {
+            const moreChip = document.createElement('span');
+            moreChip.className = 'event-chip more-chip';
+            moreChip.textContent = `+${dayEvents.length - 3} more`;
+            chips.appendChild(moreChip);
+          }
+
+          dayButton.appendChild(chips);
+          dayButton.addEventListener('click', () => {
+            selectedDate = dateKey;
+            eventDate.value = selectedDate;
+            renderCalendar();
+            renderSelectedDay();
+          });
+
+          monthGrid.appendChild(dayButton);
+        }
+
+        renderMonthAgenda();
+      }
+
+      function renderEventList(container, list, emptyMessage) {
+        container.innerHTML = '';
+
+        if (!list.length) {
+          const empty = document.createElement('li');
+          empty.className = 'empty-state';
+          empty.textContent = emptyMessage;
+          container.appendChild(empty);
+          return;
+        }
+
+        list.forEach((event) => {
+          const item = document.createElement('li');
+          item.className = 'schedule-item';
+
+          const time = document.createElement('span');
+          time.className = 'schedule-time';
+          time.textContent = event.time || 'All day';
+
+          const title = document.createElement('span');
+          title.className = 'schedule-title';
+          title.textContent = event.title;
+
+          const source = document.createElement('span');
+          source.className = `source-pill ${event.source}`;
+          source.textContent = event.source === 'cloud' ? 'Cloud' : 'Local';
+
+          item.append(time, title, source);
+          container.appendChild(item);
         });
       }
 
-      renderCloud();
+      function renderSelectedDay() {
+        const date = parseDateKey(selectedDate);
+        selectedDayTitle.textContent = dateFormatter.format(date);
+        renderEventList(selectedDayEvents, getEventsForDay(selectedDate), 'Nothing scheduled for this day.');
+      }
+
+      function renderMonthAgenda() {
+        const list = getVisibleMonthEvents().map((event) => ({
+          ...event,
+          title: `${agendaDateFormatter.format(parseDateKey(event.date))} — ${event.title}`,
+        }));
+
+        renderEventList(monthAgenda, list, 'No events found for this month yet.');
+      }
+
+      async function refreshEvents() {
+        const [cloudEvents, localEvents] = await Promise.all([loadCloudEvents(), Promise.resolve(loadLocalEvents())]);
+        events = [...cloudEvents, ...localEvents];
+        renderCalendar();
+        renderSelectedDay();
+      }
+
+      addEventButton.addEventListener('click', () => {
+        const title = eventTitle.value.trim();
+        const date = eventDate.value || selectedDate;
+        const time = eventTime.value;
+
+        if (!title || !date) return;
+
+        const localEvents = loadLocalEvents();
+        localEvents.push({
+          id: `local-${Date.now()}`,
+          title,
+          date,
+          time,
+        });
+        saveLocalEvents(localEvents);
+
+        eventTitle.value = '';
+        eventTime.value = '';
+        selectedDate = date;
+        visibleMonth = startOfMonth(parseDateKey(date));
+        refreshEvents();
+      });
+
+      prevMonthButton.addEventListener('click', () => {
+        visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
+        renderCalendar();
+        renderSelectedDay();
+      });
+
+      nextMonthButton.addEventListener('click', () => {
+        visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1);
+        renderCalendar();
+        renderSelectedDay();
+      });
+
+      todayButton.addEventListener('click', () => {
+        selectedDate = toDateKey(new Date());
+        visibleMonth = startOfMonth(new Date());
+        eventDate.value = selectedDate;
+        renderCalendar();
+        renderSelectedDay();
+      });
+
+      eventDate.value = selectedDate;
+      refreshEvents();
     </script>
     <!-- END: Calendar cloud script -->
   </body>
