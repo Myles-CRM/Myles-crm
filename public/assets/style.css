@@ -130,3 +130,16 @@ footer { padding:16px; color:var(--muted); text-align:center; }
   .contact-detail-panel { padding:18px; }
   .empty-contact-detail { padding-top:20px; }
 }
+
+/* Apple-style event editor fields */
+.event-editor-form label { color:var(--fg); }
+.event-title-card { background:#0b0f14; border:1px solid var(--border); border-radius:18px; overflow:hidden; }
+.event-title-card input { width:100%; border:0; border-radius:0; background:transparent; font-size:16px; }
+.event-title-card input + input { border-top:1px solid var(--border); }
+.toggle-row { flex-direction:row; align-items:center; justify-content:space-between; background:#0b0f14; border:1px solid var(--border); border-radius:14px; padding:10px 12px; }
+.toggle-row input { width:22px; height:22px; }
+.event-date-grid { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; background:#0b0f14; border:1px solid var(--border); border-radius:14px; padding:10px; }
+.event-date-grid label { display:grid; grid-template-columns:58px 1fr; grid-column:1 / -1; align-items:center; color:var(--fg); }
+.event-date-grid input { width:100%; }
+.event-editor-form select { width:100%; }
+.event-editor-form select[multiple] { min-height:96px; }

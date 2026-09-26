@@ -55,16 +55,45 @@
             <div class="quick-add-card">
               <p class="eyebrow">Quick add</p>
               <h3>Add an event</h3>
-              <div class="stacked-form">
-                <input id="eventTitle" placeholder="Event title" autocomplete="off" />
-                <div class="two-column-form">
-                  <input id="eventDate" type="date" />
-                  <input id="eventTime" type="time" />
+              <div class="stacked-form event-editor-form">
+                <div class="event-title-card">
+                  <input id="eventTitle" placeholder="Title" autocomplete="off" />
+                  <input id="eventLocation" placeholder="Location or Video Call" autocomplete="off" />
                 </div>
-                <input id="eventLocation" placeholder="Location / room" autocomplete="off" />
+                <label class="toggle-row">
+                  <span>All-day</span>
+                  <input id="eventAllDay" type="checkbox" />
+                </label>
+                <div class="event-date-grid">
+                  <label>Starts<input id="eventDate" type="date" /></label>
+                  <label>Time<input id="eventTime" type="time" /></label>
+                  <label>Ends<input id="eventEndDate" type="date" /></label>
+                  <label>Time<input id="eventEndTime" type="time" /></label>
+                </div>
+                <label>Travel Time
+                  <select id="eventTravelTime">
+                    <option value="none">None</option>
+                    <option value="5 minutes">5 minutes</option>
+                    <option value="15 minutes">15 minutes</option>
+                    <option value="30 minutes">30 minutes</option>
+                    <option value="1 hour">1 hour</option>
+                  </select>
+                </label>
+                <label>Repeat
+                  <select id="eventRepeat">
+                    <option value="never">Never</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </label>
+                <label>Linked contacts
+                  <select id="eventContacts" multiple size="4"></select>
+                </label>
                 <button id="addEvent" type="button">Add to this browser</button>
               </div>
-              <p class="hint">Quick add saves on this device for now. Cloud events still load from Supabase when available.</p>
+              <p class="hint">Quick add saves on this device for now. Link contacts to remember who is involved.</p>
             </div>
           </aside>
         </div>
@@ -121,7 +150,13 @@
       const eventTitle = document.getElementById('eventTitle');
       const eventDate = document.getElementById('eventDate');
       const eventTime = document.getElementById('eventTime');
+      const eventEndDate = document.getElementById('eventEndDate');
+      const eventEndTime = document.getElementById('eventEndTime');
       const eventLocation = document.getElementById('eventLocation');
+      const eventAllDay = document.getElementById('eventAllDay');
+      const eventTravelTime = document.getElementById('eventTravelTime');
+      const eventRepeat = document.getElementById('eventRepeat');
+      const eventContacts = document.getElementById('eventContacts');
       const addEventButton = document.getElementById('addEvent');
       const calendarImportUrl = document.getElementById('calendarImportUrl');
       const addCalendarFeedButton = document.getElementById('addCalendarFeed');
@@ -134,6 +169,7 @@
 
       const localStorageKey = 'myles-crm-calendar-events';
       const calendarFeedsKey = 'myles-crm-calendar-feeds';
+      const localContactsKey = 'myles-crm-contacts';
       const importRefreshHour = 5;
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
       const agendaDateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -142,6 +178,7 @@
       let visibleMonth = startOfMonth(new Date());
       let selectedDate = toDateKey(new Date());
       let events = [];
+      let contacts = [];
 
       function startOfMonth(date) {
         return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -163,9 +200,15 @@
         return {
           id: event.id || `${source}-${event.title}-${event.date}-${event.time || 'all-day'}`,
           title: event.title || 'Untitled event',
-          date: event.date,
-          time: event.time || '',
+          date: event.date || event.startDate,
+          time: event.time || event.startTime || '',
+          endDate: event.endDate || event.date || event.startDate,
+          endTime: event.endTime || '',
+          allDay: Boolean(event.allDay),
           location: event.location || '',
+          travelTime: event.travelTime || 'none',
+          repeat: event.repeat || 'never',
+          linkedContactIds: Array.isArray(event.linkedContactIds) ? event.linkedContactIds.map(String) : [],
           source,
           sourceName: event.sourceName || '',
           hidden: Boolean(event.hidden),
@@ -183,6 +226,77 @@
 
       function saveLocalEvents(localEvents) {
         localStorage.setItem(localStorageKey, JSON.stringify(localEvents));
+      }
+
+      function normaliseContact(contact, source) {
+        return {
+          id: String(contact.id || `${source}-${contact.first_name || 'contact'}-${contact.last_name || ''}`),
+          first_name: contact.first_name || '',
+          last_name: contact.last_name || '',
+          email: contact.email || '',
+          phone: contact.phone || '',
+          source,
+        };
+      }
+
+      function contactName(contact) {
+        return `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.email || 'Unnamed contact';
+      }
+
+      function loadLocalContacts() {
+        try {
+          return JSON.parse(localStorage.getItem(localContactsKey) || '[]').map((contact) => normaliseContact(contact, 'local'));
+        } catch (error) {
+          console.warn('Could not read local contacts', error);
+          return [];
+        }
+      }
+
+      async function loadCloudContacts() {
+        if (!window.supabase) return [];
+
+        const { data, error } = await window.supabase
+          .from('contacts')
+          .select('*')
+          .is('deleted_at', null)
+          .order('first_name', { ascending: true })
+          .order('last_name', { ascending: true });
+
+        if (error) {
+          console.warn('Could not load cloud contacts', error);
+          return [];
+        }
+
+        return (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+      }
+
+      function getLinkedContactNames(event) {
+        return (event.linkedContactIds || [])
+          .map((contactId) => contacts.find((contact) => contact.id === String(contactId)))
+          .filter(Boolean)
+          .map(contactName);
+      }
+
+      function renderContactOptions() {
+        eventContacts.innerHTML = '';
+
+        if (!contacts.length) {
+          const option = document.createElement('option');
+          option.disabled = true;
+          option.textContent = 'No contacts yet';
+          eventContacts.appendChild(option);
+          return;
+        }
+
+        contacts
+          .slice()
+          .sort((a, b) => contactName(a).localeCompare(contactName(b)))
+          .forEach((contact) => {
+            const option = document.createElement('option');
+            option.value = contact.id;
+            option.textContent = contactName(contact);
+            eventContacts.appendChild(option);
+          });
       }
 
       function loadCalendarFeeds() {
@@ -518,6 +632,7 @@
           dayButton.addEventListener('click', () => {
             selectedDate = dateKey;
             eventDate.value = selectedDate;
+            eventEndDate.value = selectedDate;
             renderCalendar();
             renderSelectedDay();
           });
@@ -545,7 +660,7 @@
 
           const time = document.createElement('span');
           time.className = 'schedule-time';
-          time.textContent = event.time || 'All day';
+          time.textContent = event.allDay ? 'All day' : (event.time || 'All day');
 
           const eventDetails = document.createElement('span');
           eventDetails.className = 'schedule-details';
@@ -560,6 +675,26 @@
             location.className = 'schedule-location';
             location.textContent = `📍 ${event.location}`;
             eventDetails.appendChild(location);
+          }
+
+          if (event.endTime && !event.allDay) {
+            const endTime = document.createElement('span');
+            endTime.className = 'schedule-location';
+            endTime.textContent = `Ends ${event.endTime}`;
+            eventDetails.appendChild(endTime);
+          }
+
+          const extraDetails = [];
+          if (event.allDay) extraDetails.push('All-day');
+          if (event.travelTime && event.travelTime !== 'none') extraDetails.push(`Travel ${event.travelTime}`);
+          if (event.repeat && event.repeat !== 'never') extraDetails.push(`Repeats ${event.repeat}`);
+          const linkedNames = getLinkedContactNames(event);
+          if (linkedNames.length) extraDetails.push(`With ${linkedNames.join(', ')}`);
+          if (extraDetails.length) {
+            const extras = document.createElement('span');
+            extras.className = 'schedule-location';
+            extras.textContent = extraDetails.join(' • ');
+            eventDetails.appendChild(extras);
           }
 
           const source = document.createElement('span');
@@ -607,8 +742,11 @@
       addEventButton.addEventListener('click', () => {
         const title = eventTitle.value.trim();
         const date = eventDate.value || selectedDate;
-        const time = eventTime.value;
+        const time = eventAllDay.checked ? '' : eventTime.value;
+        const endDate = eventEndDate.value || date;
+        const endTime = eventAllDay.checked ? '' : eventEndTime.value;
         const location = eventLocation.value.trim();
+        const linkedContactIds = Array.from(eventContacts.selectedOptions).map((option) => option.value);
 
         if (!title || !date) return;
 
@@ -618,13 +756,25 @@
           title,
           date,
           time,
+          endDate,
+          endTime,
+          allDay: eventAllDay.checked,
           location,
+          travelTime: eventTravelTime.value,
+          repeat: eventRepeat.value,
+          linkedContactIds,
         });
         saveLocalEvents(localEvents);
 
         eventTitle.value = '';
         eventTime.value = '';
+        eventEndDate.value = date;
+        eventEndTime.value = '';
         eventLocation.value = '';
+        eventAllDay.checked = false;
+        eventTravelTime.value = 'none';
+        eventRepeat.value = 'never';
+        Array.from(eventContacts.options).forEach((option) => { option.selected = false; });
         selectedDate = date;
         visibleMonth = startOfMonth(parseDateKey(date));
         refreshEvents();
@@ -663,6 +813,15 @@
         refreshEvents();
       });
 
+      eventAllDay.addEventListener('change', () => {
+        eventTime.disabled = eventAllDay.checked;
+        eventEndTime.disabled = eventAllDay.checked;
+        if (eventAllDay.checked) {
+          eventTime.value = '';
+          eventEndTime.value = '';
+        }
+      });
+
       prevMonthButton.addEventListener('click', () => {
         visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
         renderCalendar();
@@ -679,6 +838,7 @@
         selectedDate = toDateKey(new Date());
         visibleMonth = startOfMonth(new Date());
         eventDate.value = selectedDate;
+        eventEndDate.value = selectedDate;
         renderCalendar();
         renderSelectedDay();
       });
@@ -698,9 +858,16 @@
         }, getNextDailyRefreshDelay());
       }
 
+      async function refreshContacts() {
+        const [cloudContacts, localContacts] = await Promise.all([loadCloudContacts(), Promise.resolve(loadLocalContacts())]);
+        contacts = [...cloudContacts, ...localContacts];
+        renderContactOptions();
+      }
+
       eventDate.value = selectedDate;
+      eventEndDate.value = selectedDate;
       renderCalendarFeeds();
-      refreshEvents().then(scheduleNextDailyImportRefresh);
+      refreshContacts().then(() => refreshEvents()).then(scheduleNextDailyImportRefresh);
     </script>
     <!-- END: Calendar cloud script -->
   </body>
