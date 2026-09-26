@@ -61,12 +61,29 @@
                   <input id="eventDate" type="date" />
                   <input id="eventTime" type="time" />
                 </div>
+                <input id="eventLocation" placeholder="Location / room" autocomplete="off" />
                 <button id="addEvent" type="button">Add to this browser</button>
               </div>
               <p class="hint">Quick add saves on this device for now. Cloud events still load from Supabase when available.</p>
             </div>
           </aside>
         </div>
+      </section>
+
+      <section class="card import-calendar-card">
+        <div class="calendar-toolbar compact">
+          <div>
+            <p class="eyebrow">Calendar import</p>
+            <h2>Import lessons from Daymap or iCal</h2>
+          </div>
+          <button id="refreshImports" type="button" class="secondary-button">Refresh imports</button>
+        </div>
+        <div class="stacked-form">
+          <input id="calendarImportUrl" placeholder="Paste a Daymap / iCal / .ics calendar link" autocomplete="off" />
+          <button id="addCalendarFeed" type="button">Add calendar link</button>
+        </div>
+        <p id="importStatus" class="hint">Imported calendars auto-refresh while this page is open.</p>
+        <ul id="importCalendarsList" class="calendar-feed-list"></ul>
       </section>
 
       <section class="card month-agenda-card">
@@ -104,12 +121,20 @@
       const eventTitle = document.getElementById('eventTitle');
       const eventDate = document.getElementById('eventDate');
       const eventTime = document.getElementById('eventTime');
+      const eventLocation = document.getElementById('eventLocation');
       const addEventButton = document.getElementById('addEvent');
+      const calendarImportUrl = document.getElementById('calendarImportUrl');
+      const addCalendarFeedButton = document.getElementById('addCalendarFeed');
+      const refreshImportsButton = document.getElementById('refreshImports');
+      const importStatus = document.getElementById('importStatus');
+      const importCalendarsList = document.getElementById('importCalendarsList');
       const prevMonthButton = document.getElementById('prevMonth');
       const nextMonthButton = document.getElementById('nextMonth');
       const todayButton = document.getElementById('todayButton');
 
       const localStorageKey = 'myles-crm-calendar-events';
+      const calendarFeedsKey = 'myles-crm-calendar-feeds';
+      const importRefreshMinutes = 15;
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
       const agendaDateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'long', year: 'numeric' });
@@ -140,7 +165,9 @@
           title: event.title || 'Untitled event',
           date: event.date,
           time: event.time || '',
+          location: event.location || '',
           source,
+          sourceName: event.sourceName || '',
         };
       }
 
@@ -155,6 +182,181 @@
 
       function saveLocalEvents(localEvents) {
         localStorage.setItem(localStorageKey, JSON.stringify(localEvents));
+      }
+
+      function loadCalendarFeeds() {
+        try {
+          return JSON.parse(localStorage.getItem(calendarFeedsKey) || '[]');
+        } catch (error) {
+          console.warn('Could not read imported calendars', error);
+          return [];
+        }
+      }
+
+      function saveCalendarFeeds(feeds) {
+        localStorage.setItem(calendarFeedsKey, JSON.stringify(feeds));
+      }
+
+      function loadImportedEvents() {
+        return loadCalendarFeeds().flatMap((feed) =>
+          (feed.events || []).map((event) => normaliseEvent({ ...event, sourceName: feed.name }, 'import'))
+        );
+      }
+
+      function decodeICalValue(value = '') {
+        return value
+          .replace(/\\n/g, ' ')
+          .replace(/\\,/g, ',')
+          .replace(/\\;/g, ';')
+          .replace(/\\\\/g, '\\')
+          .trim();
+      }
+
+      function readICalLine(line) {
+        const separatorIndex = line.indexOf(':');
+        if (separatorIndex === -1) return null;
+        const name = line.slice(0, separatorIndex).split(';')[0].toUpperCase();
+        const value = decodeICalValue(line.slice(separatorIndex + 1));
+        return { name, value };
+      }
+
+      function parseICalDate(value = '') {
+        const dateMatch = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+        if (dateMatch) {
+          return { date: `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`, time: '' };
+        }
+
+        const dateTimeMatch = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+        if (!dateTimeMatch) return null;
+
+        const [, year, month, day, hour, minute] = dateTimeMatch;
+        if (value.endsWith('Z')) {
+          const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)));
+          return { date: toDateKey(date), time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` };
+        }
+
+        return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
+      }
+
+      function parseICalEvents(icsText, feed) {
+        const lines = icsText.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+        const parsedEvents = [];
+        let currentEvent = null;
+
+        lines.forEach((line) => {
+          if (line === 'BEGIN:VEVENT') {
+            currentEvent = {};
+            return;
+          }
+
+          if (line === 'END:VEVENT') {
+            if (currentEvent?.title && currentEvent?.date) {
+              parsedEvents.push(normaliseEvent(currentEvent, 'import'));
+            }
+            currentEvent = null;
+            return;
+          }
+
+          if (!currentEvent) return;
+
+          const parsedLine = readICalLine(line);
+          if (!parsedLine) return;
+
+          if (parsedLine.name === 'UID') currentEvent.id = `import-${feed.id}-${parsedLine.value}`;
+          if (parsedLine.name === 'SUMMARY') currentEvent.title = parsedLine.value;
+          if (parsedLine.name === 'LOCATION') currentEvent.location = parsedLine.value;
+          if (parsedLine.name === 'DTSTART') {
+            const start = parseICalDate(parsedLine.value);
+            if (start) {
+              currentEvent.date = start.date;
+              currentEvent.time = start.time;
+            }
+          }
+          currentEvent.sourceName = feed.name;
+        });
+
+        return parsedEvents;
+      }
+
+      async function refreshCalendarFeed(feed) {
+        const response = await fetch(feed.url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Calendar link returned ${response.status}`);
+        const icsText = await response.text();
+        const events = parseICalEvents(icsText, feed);
+        return {
+          ...feed,
+          events,
+          updatedAt: new Date().toISOString(),
+          status: `Updated ${events.length} event${events.length === 1 ? '' : 's'}`,
+        };
+      }
+
+      async function refreshImportedCalendars(force = false) {
+        const feeds = loadCalendarFeeds();
+        if (!feeds.length) {
+          renderCalendarFeeds();
+          return;
+        }
+
+        const now = Date.now();
+        const refreshedFeeds = [];
+
+        for (const feed of feeds) {
+          const lastUpdated = feed.updatedAt ? new Date(feed.updatedAt).getTime() : 0;
+          const dueForRefresh = force || !lastUpdated || now - lastUpdated > importRefreshMinutes * 60 * 1000;
+
+          if (!dueForRefresh) {
+            refreshedFeeds.push(feed);
+            continue;
+          }
+
+          try {
+            refreshedFeeds.push(await refreshCalendarFeed(feed));
+          } catch (error) {
+            console.warn('Could not refresh calendar feed', error);
+            refreshedFeeds.push({
+              ...feed,
+              status: 'Could not refresh. Check the link or try exporting an iCal/ICS link.',
+            });
+          }
+        }
+
+        saveCalendarFeeds(refreshedFeeds);
+        importStatus.textContent = `Imported calendars refresh every ${importRefreshMinutes} minutes while this page is open.`;
+        renderCalendarFeeds();
+      }
+
+      function renderCalendarFeeds() {
+        const feeds = loadCalendarFeeds();
+        importCalendarsList.innerHTML = '';
+
+        if (!feeds.length) {
+          const empty = document.createElement('li');
+          empty.className = 'empty-state';
+          empty.textContent = 'No imported calendars yet. Paste a Daymap/iCal link above to add one.';
+          importCalendarsList.appendChild(empty);
+          return;
+        }
+
+        feeds.forEach((feed) => {
+          const item = document.createElement('li');
+          item.className = 'calendar-feed-item';
+
+          const details = document.createElement('span');
+          details.textContent = `${feed.name} — ${feed.status || 'Waiting to refresh'}`;
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'secondary-button';
+          removeButton.textContent = 'Remove';
+          removeButton.addEventListener('click', () => {
+            saveCalendarFeeds(loadCalendarFeeds().filter((savedFeed) => savedFeed.id !== feed.id));
+            refreshEvents();
+          });
+
+          item.append(details, removeButton);
+          importCalendarsList.appendChild(item);
+        });
       }
 
       async function loadCloudEvents() {
@@ -173,6 +375,12 @@
         }
 
         return (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
+      }
+
+      function getSourceLabel(event) {
+        if (event.source === 'cloud') return 'Cloud';
+        if (event.source === 'import') return event.sourceName || 'Import';
+        return 'Local';
       }
 
       function getEventsForDay(dateKey) {
@@ -270,15 +478,26 @@
           time.className = 'schedule-time';
           time.textContent = event.time || 'All day';
 
+          const eventDetails = document.createElement('span');
+          eventDetails.className = 'schedule-details';
+
           const title = document.createElement('span');
           title.className = 'schedule-title';
           title.textContent = event.title;
+          eventDetails.appendChild(title);
+
+          if (event.location) {
+            const location = document.createElement('span');
+            location.className = 'schedule-location';
+            location.textContent = `📍 ${event.location}`;
+            eventDetails.appendChild(location);
+          }
 
           const source = document.createElement('span');
           source.className = `source-pill ${event.source}`;
-          source.textContent = event.source === 'cloud' ? 'Cloud' : 'Local';
+          source.textContent = getSourceLabel(event);
 
-          item.append(time, title, source);
+          item.append(time, eventDetails, source);
           container.appendChild(item);
         });
       }
@@ -299,8 +518,13 @@
       }
 
       async function refreshEvents() {
-        const [cloudEvents, localEvents] = await Promise.all([loadCloudEvents(), Promise.resolve(loadLocalEvents())]);
-        events = [...cloudEvents, ...localEvents];
+        await refreshImportedCalendars();
+        const [cloudEvents, localEvents, importedEvents] = await Promise.all([
+          loadCloudEvents(),
+          Promise.resolve(loadLocalEvents()),
+          Promise.resolve(loadImportedEvents()),
+        ]);
+        events = [...cloudEvents, ...localEvents, ...importedEvents];
         renderCalendar();
         renderSelectedDay();
       }
@@ -309,6 +533,7 @@
         const title = eventTitle.value.trim();
         const date = eventDate.value || selectedDate;
         const time = eventTime.value;
+        const location = eventLocation.value.trim();
 
         if (!title || !date) return;
 
@@ -318,13 +543,48 @@
           title,
           date,
           time,
+          location,
         });
         saveLocalEvents(localEvents);
 
         eventTitle.value = '';
         eventTime.value = '';
+        eventLocation.value = '';
         selectedDate = date;
         visibleMonth = startOfMonth(parseDateKey(date));
+        refreshEvents();
+      });
+
+      addCalendarFeedButton.addEventListener('click', async () => {
+        const url = calendarImportUrl.value.trim();
+
+        if (!url) return;
+        if (!/^https?:\/\//i.test(url)) {
+          importStatus.textContent = 'Please paste a full calendar link that starts with https://';
+          return;
+        }
+
+        const feeds = loadCalendarFeeds();
+        const feedNumber = feeds.length + 1;
+        const feed = {
+          id: `feed-${Date.now()}`,
+          name: `Imported calendar ${feedNumber}`,
+          url,
+          events: [],
+          updatedAt: '',
+          status: 'Added, refreshing now…',
+        };
+
+        saveCalendarFeeds([...feeds, feed]);
+        calendarImportUrl.value = '';
+        importStatus.textContent = 'Refreshing imported calendar…';
+        await refreshImportedCalendars(true);
+        refreshEvents();
+      });
+
+      refreshImportsButton.addEventListener('click', async () => {
+        importStatus.textContent = 'Refreshing imported calendars…';
+        await refreshImportedCalendars(true);
         refreshEvents();
       });
 
@@ -349,7 +609,9 @@
       });
 
       eventDate.value = selectedDate;
+      renderCalendarFeeds();
       refreshEvents();
+      setInterval(refreshEvents, importRefreshMinutes * 60 * 1000);
     </script>
     <!-- END: Calendar cloud script -->
   </body>
