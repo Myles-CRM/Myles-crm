@@ -14,71 +14,312 @@
         <a href="notes.html">Notes</a>
         <a href="contacts.html" class="active">Contacts</a>
         <a href="calendar.html">Calendar</a>
-</nav>
+      </nav>
     </header>
-    <main>
-      <form id="contactForm" class="card">
-        <div class="grid">
-          <label>First Name<input name="first_name" required></label>
-          <label>Last Name<input name="last_name" required></label>
-          <label>Phone Number<input name="phone" type="tel"></label>
-          <label>Address<input name="address"></label>
-          <label>Email<input name="email" type="email"></label>
-          <label>Profession<input name="profession"></label>
+
+    <main class="contacts-page">
+      <section class="contacts-shell card" aria-label="Contacts app">
+        <aside class="contacts-sidebar">
+          <div class="contacts-toolbar">
+            <div>
+              <p class="eyebrow">Contacts</p>
+              <h2>All Contacts</h2>
+            </div>
+            <button id="newContactButton" type="button" class="round-button" aria-label="New contact">+</button>
+          </div>
+          <input id="search" class="contact-search" placeholder="Search contacts" autocomplete="off" />
+          <ul id="list" class="contact-list"></ul>
+        </aside>
+
+        <section class="contact-detail-panel" aria-label="Selected contact details">
+          <div id="contactDetail" class="contact-detail empty-contact-detail">
+            <div class="contact-avatar large">?</div>
+            <h2>Select a contact</h2>
+            <p class="hint">Choose someone from the list, or press + to add a new contact.</p>
+          </div>
+        </section>
+      </section>
+
+      <section id="contactEditor" class="card contact-editor-card" aria-label="Add contact form">
+        <div class="calendar-toolbar compact">
+          <div>
+            <p class="eyebrow">New contact</p>
+            <h2>Add someone</h2>
+          </div>
         </div>
-        <label>Notes<textarea name="notes" rows="4"></textarea></label>
-        <button type="submit" disabled>Add Contact</button>
-        <span id="formStatus"></span>
-      </form>
-<section class="card">
-        <h2>Saved Contacts</h2>
-        <input id="search" placeholder="Search by name or email" />
-        <ul id="list" class="list"></ul>
+        <form id="contactForm" class="stacked-form">
+          <div class="two-column-form">
+            <input name="first_name" placeholder="First name" autocomplete="given-name" required />
+            <input name="last_name" placeholder="Last name" autocomplete="family-name" required />
+          </div>
+          <div class="two-column-form">
+            <input name="phone" type="tel" placeholder="Phone" autocomplete="tel" />
+            <input name="email" type="email" placeholder="Email" autocomplete="email" />
+          </div>
+          <div class="two-column-form">
+            <input name="address" placeholder="Address" autocomplete="street-address" />
+            <input name="profession" placeholder="Role / profession" />
+          </div>
+          <textarea name="notes" rows="4" placeholder="Notes"></textarea>
+          <div class="row form-actions-row">
+            <button id="addContactButton" type="submit">Add Contact</button>
+            <span id="formStatus" class="hint" role="status"></span>
+          </div>
+        </form>
       </section>
     </main>
+
     <footer>
-      <small>Cloud data via Supabase.</small>
+      <small>Cloud data via Supabase. Contacts also save locally if cloud saving is not available.</small>
     </footer>
 
     <!-- START: Supabase config (set your values) -->
     <script>
       window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';
-      window.SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYnpqZWlwcnJhdGJ5am5zYmdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxOTEwMTQsImV4cCI6MjA5MTc2NzAxNH0.cQ5Ty5c4PsFFhXlKT6smGusvzCqAGJeKMVej_aDYi6M';
+      window.SUPABASE_ANON = 'eyJhbG…Yi6M';
     </script>
     <!-- END: Supabase config -->
-<script src="assets/common.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="assets/common.js"></script>
 
     <!-- START: Contacts cloud script -->
     <script>
-      const list=document.getElementById('list');
-      const search=document.getElementById('search');
+      const contactForm = document.getElementById('contactForm');
+      const addContactButton = document.getElementById('addContactButton');
+      const contactEditor = document.getElementById('contactEditor');
+      const contactDetail = document.getElementById('contactDetail');
+      const formStatus = document.getElementById('formStatus');
+      const list = document.getElementById('list');
+      const newContactButton = document.getElementById('newContactButton');
+      const search = document.getElementById('search');
 
-      async function renderCloud(filter=''){
-        if (!window.supabase) { list.innerHTML = '<li>Cloud not set.</li>'; return; }
+      const localContactsKey = 'myles-crm-contacts';
+      let contacts = [];
+      let selectedContactId = '';
+
+      function escapeText(value = '') {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function initialsFor(contact) {
+        const first = (contact.first_name || '').trim()[0] || '';
+        const last = (contact.last_name || '').trim()[0] || '';
+        return `${first}${last}`.toUpperCase() || '?';
+      }
+
+      function fullName(contact) {
+        return `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Unnamed contact';
+      }
+
+      function normaliseContact(contact, source) {
+        return {
+          id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          first_name: contact.first_name || '',
+          last_name: contact.last_name || '',
+          phone: contact.phone || '',
+          email: contact.email || '',
+          address: contact.address || '',
+          profession: contact.profession || '',
+          notes: contact.notes || '',
+          source,
+          created_at: contact.created_at || new Date().toISOString(),
+        };
+      }
+
+      function loadLocalContacts() {
+        try {
+          return JSON.parse(localStorage.getItem(localContactsKey) || '[]').map((contact) => normaliseContact(contact, 'local'));
+        } catch (error) {
+          console.warn('Could not read local contacts', error);
+          return [];
+        }
+      }
+
+      function saveLocalContacts(localContacts) {
+        localStorage.setItem(localContactsKey, JSON.stringify(localContacts));
+      }
+
+      async function loadCloudContacts() {
+        if (!window.supabase) return [];
+
         const { data, error } = await window.supabase
           .from('contacts')
           .select('*')
           .is('deleted_at', null)
-          .order('created_at', { ascending: true });
-        if (error) { list.innerHTML = <li>Cloud error: ${error.message}</li>; return; }
+          .order('first_name', { ascending: true })
+          .order('last_name', { ascending: true });
 
-        const q=filter.toLowerCase();
-list.innerHTML='';
-        data
-          .filter(c=>${c.first_name} ${c.last_name} ${c.email||''}.toLowerCase().includes(q))
-          .forEach((c)=>{
-            const li=document.createElement('li');
-            li.innerHTML=<strong>${c.first_name} ${c.last_name}</strong><br>
-              ${c.email||''} ${c.phone? ' • '+c.phone: ''}<br>
-              ${c.address||''} ${c.profession? ' • '+c.profession: ''}<br>
-              <em>${c.notes||''}</em>;
-            list.appendChild(li);
-          });
+        if (error) {
+          console.warn('Could not load cloud contacts', error);
+          return [];
+        }
+
+        return (data || []).map((contact) => normaliseContact(contact, 'cloud'));
       }
 
-      search.addEventListener('input', ()=>renderCloud(search.value));
-      renderCloud();
+      async function saveCloudContact(contact) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+
+        const { data, error } = await window.supabase
+          .from('contacts')
+          .insert([{ ...contact, created_by: 'Myles' }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        return normaliseContact(data, 'cloud');
+      }
+
+      function filteredContacts() {
+        const query = search.value.trim().toLowerCase();
+        if (!query) return contacts;
+
+        return contacts.filter((contact) =>
+          [fullName(contact), contact.email, contact.phone, contact.address, contact.profession, contact.notes]
+            .join(' ')
+            .toLowerCase()
+            .includes(query)
+        );
+      }
+
+      function renderContactList() {
+        const visibleContacts = filteredContacts().sort((a, b) => fullName(a).localeCompare(fullName(b)));
+        list.innerHTML = '';
+
+        if (!visibleContacts.length) {
+          const empty = document.createElement('li');
+          empty.className = 'empty-state';
+          empty.textContent = search.value ? 'No contacts match that search.' : 'No contacts yet. Press + to add one.';
+          list.appendChild(empty);
+          renderSelectedContact();
+          return;
+        }
+
+        if (!selectedContactId || !contacts.some((contact) => contact.id === selectedContactId)) {
+          selectedContactId = visibleContacts[0]?.id || '';
+        }
+
+        visibleContacts.forEach((contact) => {
+          const item = document.createElement('li');
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'contact-row';
+          if (contact.id === selectedContactId) button.classList.add('active');
+          button.innerHTML = `
+            <span class="contact-avatar">${escapeText(initialsFor(contact))}</span>
+            <span class="contact-row-text">
+              <strong>${escapeText(fullName(contact))}</strong>
+              <small>${escapeText(contact.profession || contact.email || contact.phone || 'No details yet')}</small>
+            </span>
+          `;
+          button.addEventListener('click', () => {
+            selectedContactId = contact.id;
+            renderContactList();
+            renderSelectedContact();
+          });
+          item.appendChild(button);
+          list.appendChild(item);
+        });
+
+        renderSelectedContact();
+      }
+
+      function detailLine(label, value, href = '') {
+        if (!value) return '';
+        const safeValue = escapeText(value);
+        const content = href ? `<a href="${escapeText(href)}">${safeValue}</a>` : safeValue;
+        return `<div class="contact-detail-line"><span>${label}</span><strong>${content}</strong></div>`;
+      }
+
+      function renderSelectedContact() {
+        const contact = contacts.find((item) => item.id === selectedContactId);
+        if (!contact) {
+          contactDetail.className = 'contact-detail empty-contact-detail';
+          contactDetail.innerHTML = `
+            <div class="contact-avatar large">?</div>
+            <h2>Select a contact</h2>
+            <p class="hint">Choose someone from the list, or press + to add a new contact.</p>
+          `;
+          return;
+        }
+
+        contactDetail.className = 'contact-detail';
+        contactDetail.innerHTML = `
+          <div class="contact-avatar large">${escapeText(initialsFor(contact))}</div>
+          <h2>${escapeText(fullName(contact))}</h2>
+          <p class="contact-subtitle">${escapeText(contact.profession || (contact.source === 'cloud' ? 'Cloud contact' : 'Saved on this device'))}</p>
+          <div class="contact-action-row">
+            ${contact.phone ? `<a class="contact-action" href="tel:${escapeText(contact.phone)}">Call</a>` : ''}
+            ${contact.email ? `<a class="contact-action" href="mailto:${escapeText(contact.email)}">Email</a>` : ''}
+            ${contact.address ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(contact.address)}">Map</a>` : ''}
+          </div>
+          <div class="contact-detail-card">
+            ${detailLine('mobile', contact.phone, contact.phone ? `tel:${contact.phone}` : '')}
+            ${detailLine('email', contact.email, contact.email ? `mailto:${contact.email}` : '')}
+            ${detailLine('address', contact.address)}
+            ${detailLine('notes', contact.notes)}
+          </div>
+        `;
+      }
+
+      async function refreshContacts() {
+        const [cloudContacts, localContacts] = await Promise.all([loadCloudContacts(), Promise.resolve(loadLocalContacts())]);
+        contacts = [...cloudContacts, ...localContacts];
+        renderContactList();
+      }
+
+      contactForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formData = new FormData(contactForm);
+        const contact = normaliseContact(Object.fromEntries(formData.entries()), 'local');
+
+        if (!contact.first_name.trim() || !contact.last_name.trim()) {
+          formStatus.textContent = 'First and last name are needed.';
+          return;
+        }
+
+        addContactButton.disabled = true;
+        formStatus.textContent = 'Saving…';
+
+        try {
+          const savedContact = await saveCloudContact({
+            first_name: contact.first_name.trim(),
+            last_name: contact.last_name.trim(),
+            phone: contact.phone.trim(),
+            email: contact.email.trim(),
+            address: contact.address.trim(),
+            profession: contact.profession.trim(),
+            notes: contact.notes.trim(),
+          });
+          selectedContactId = savedContact.id;
+          formStatus.textContent = 'Saved to cloud.';
+        } catch (error) {
+          const localContacts = loadLocalContacts();
+          localContacts.push(contact);
+          saveLocalContacts(localContacts);
+          selectedContactId = contact.id;
+          formStatus.textContent = 'Saved on this device.';
+        }
+
+        contactForm.reset();
+        addContactButton.disabled = false;
+        await refreshContacts();
+      });
+
+      newContactButton.addEventListener('click', () => {
+        contactEditor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        contactForm.elements.first_name.focus();
+      });
+
+      search.addEventListener('input', renderContactList);
+      refreshContacts();
     </script>
     <!-- END: Contacts cloud script -->
-</body>
+  </body>
 </html>
