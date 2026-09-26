@@ -176,6 +176,37 @@
         return normaliseContact(data, 'cloud');
       }
 
+      async function deleteCloudContact(contact) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+        const { error } = await window.supabase
+          .from('contacts')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('id', contact.id);
+        if (error) throw error;
+      }
+
+      function deleteLocalContact(contact) {
+        saveLocalContacts(loadLocalContacts().filter((savedContact) => savedContact.id !== contact.id));
+      }
+
+      async function deleteSelectedContact() {
+        const contact = contacts.find((item) => item.id === selectedContactId);
+        if (!contact) return;
+        const okToDelete = confirm(`Delete ${fullName(contact)}?`);
+        if (!okToDelete) return;
+
+        try {
+          if (contact.source === 'cloud') await deleteCloudContact(contact);
+          if (contact.source === 'local') deleteLocalContact(contact);
+          selectedContactId = '';
+          formStatus.textContent = 'Contact deleted.';
+          await refreshContacts();
+        } catch (error) {
+          console.warn('Could not delete contact', error);
+          formStatus.textContent = 'Could not delete that contact yet.';
+        }
+      }
+
       function filteredContacts() {
         const query = search.value.trim().toLowerCase();
         if (!query) return contacts;
@@ -258,6 +289,7 @@
             ${contact.phone ? `<a class="contact-action" href="tel:${escapeText(contact.phone)}">Call</a>` : ''}
             ${contact.email ? `<a class="contact-action" href="mailto:${escapeText(contact.email)}">Email</a>` : ''}
             ${contact.address ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(contact.address)}">Map</a>` : ''}
+            <button class="contact-action danger-action" type="button" data-action="delete-contact">Delete</button>
           </div>
           <div class="contact-detail-card">
             ${detailLine('mobile', contact.phone, contact.phone ? `tel:${contact.phone}` : '')}
@@ -310,6 +342,10 @@
         contactForm.reset();
         addContactButton.disabled = false;
         await refreshContacts();
+      });
+
+      contactDetail.addEventListener('click', (event) => {
+        if (event.target.closest('[data-action="delete-contact"]')) deleteSelectedContact();
       });
 
       newContactButton.addEventListener('click', () => {
