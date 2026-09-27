@@ -1,10 +1,11 @@
-const CACHE_NAME = 'myles-crm-offline-v3';
+const CACHE_NAME = 'myles-crm-offline-v4';
 const CORE_ASSETS = [
   './',
   './index.html',
   './notes.html',
   './contacts.html',
   './calendar.html',
+  './buddy-inbox.html',
   './assets/style.css',
   './assets/common.js',
   './manifest.webmanifest'

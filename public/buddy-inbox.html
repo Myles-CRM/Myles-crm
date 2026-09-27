@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Myles CRM — Buddy Inbox</title>
+    <link rel="stylesheet" href="assets/style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#2563eb" />
+  </head>
+  <body>
+    <header>
+      <h1>Buddy Inbox</h1>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="notes.html">Notes</a>
+        <a href="contacts.html">Contacts</a>
+        <a href="calendar.html">Calendar</a>
+        <a href="buddy-inbox.html" class="active">Buddy Inbox</a>
+      </nav>
+    </header>
+
+    <main class="buddy-inbox-page">
+      <section class="card hero-card">
+        <p class="eyebrow">Send this to Buddy</p>
+        <h2>Your safe forwarding inbox</h2>
+        <p>
+          Buddy Inbox is for emails you choose to forward: school notes, lesson updates,
+          robotics ideas, calendar details, and anything you want Buddy to help organise.
+        </p>
+        <div class="status-grid" aria-label="Inbox setup status">
+          <div class="status-tile ready">
+            <strong>Designed</strong>
+            <span>CRM page, database table, and webhook code are ready.</span>
+          </div>
+          <div class="status-tile waiting">
+            <strong>Waiting for Dad</strong>
+            <span>Needs the real email service key and webhook secret added safely.</span>
+          </div>
+          <div class="status-tile safe">
+            <strong>Safety first</strong>
+            <span>No passwords in chat. No banking, login codes, or private family emails.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid inbox-grid">
+        <article class="card">
+          <p class="eyebrow">How it will work</p>
+          <h2>Forward → Buddy reads → CRM helps</h2>
+          <ol class="setup-list">
+            <li>You forward a useful email to Buddy's address.</li>
+            <li>The email service sends it to the secure CRM webhook.</li>
+            <li>The CRM saves it in Buddy Inbox for Buddy to summarise or turn into notes, reminders, contacts, or calendar items.</li>
+          </ol>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Good things to forward</p>
+          <h2>Buddy-friendly emails</h2>
+          <ul class="check-list">
+            <li>Music lesson notes or practice tasks</li>
+            <li>Robotics links, instructions, or parts info</li>
+            <li>School event details and calendar updates</li>
+            <li>Homework reminders or project instructions</li>
+            <li>Emails you want summarised into the CRM</li>
+          </ul>
+        </article>
+
+        <article class="card warning-card">
+          <p class="eyebrow">Do not forward</p>
+          <h2>Stuff Buddy should not receive</h2>
+          <ul class="check-list warning-list">
+            <li>Passwords, login links, or verification codes</li>
+            <li>Banking, payments, or private family documents</li>
+            <li>Anything Dad has not said is okay to share</li>
+            <li>Messages from someone who expects it to stay private</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Dad setup checklist</p>
+          <h2>What Dad adds later</h2>
+          <ul class="setup-list code-list">
+            <li><code>SUPABASE_SERVICE_KEY</code> — lets the server save private inbox messages.</li>
+            <li><code>RESEND_API_KEY</code> — lets the server read the full forwarded email body.</li>
+            <li><code>BUDDY_INBOX_WEBHOOK_TOKEN</code> — secret token to stop random posts.</li>
+            <li><code>BUDDY_INBOX_ALLOWED_TO</code> — the Buddy email address allowed to receive.</li>
+            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox?token=...</code>.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="card">
+        <p class="eyebrow">Email identity draft</p>
+        <h2>Buddy CRM Assistant</h2>
+        <div class="signature-card">
+          <p><strong>Display name:</strong> Buddy CRM Assistant</p>
+          <p><strong>Purpose:</strong> read selected forwarded emails and help Myles organise them.</p>
+          <p><strong>Signature:</strong></p>
+          <blockquote>
+            Cheers,<br />
+            Buddy 🤖<br />
+            Myles' CRM assistant for reminders, notes, robots, music, and useful email sorting.
+          </blockquote>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <small>Buddy Inbox is designed but not connected until Dad approves and adds the real email secrets.</small>
+    </footer>
+
+    <script src="assets/common.js"></script>
+  </body>
+</html>
