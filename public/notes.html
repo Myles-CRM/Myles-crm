@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Myles CRM — Notes</title>
     <link rel="stylesheet" href="assets/style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#2563eb" />
   </head>
   <body>
     <header>
@@ -50,12 +52,21 @@
       const tabs = document.querySelectorAll('.tab');
       const notesArea = document.getElementById('notesArea');
       const statusEl = document.getElementById('status');
+      const notesCachePrefix = 'myles-crm-notes-cache-';
       let currentTab = 'guitar';
+
+      function loadCachedNotes(tab) {
+        return localStorage.getItem(`${notesCachePrefix}${tab}`) || '';
+      }
+
+      function showCachedNotes(tab, message) {
+        notesArea.value = loadCachedNotes(tab);
+        statusEl.textContent = message;
+      }
 
       async function loadCloud(tab){
 if (!window.supabase) {
-          statusEl.textContent = 'Cloud not set.';
-          notesArea.value = '';
+          showCachedNotes(tab, 'Offline — showing last saved copy on this device.');
           return;
         }
         const { data, error } = await window.supabase
@@ -65,11 +76,11 @@ if (!window.supabase) {
           .is('deleted_at', null)
           .order('created_at', { ascending: true });
         if (error) {
-          statusEl.textContent = 'Cloud error.';
-          notesArea.value = '';
+          showCachedNotes(tab, 'Offline — showing last saved copy on this device.');
           return;
         }
         const latest = data.length ? data[data.length-1].content : '';
+        localStorage.setItem(`${notesCachePrefix}${tab}`, latest);
 notesArea.value = latest;
         statusEl.textContent = `Loaded ${tab} notes (${data.length}).`;
       }

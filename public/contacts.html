@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Myles CRM — Contacts</title>
     <link rel="stylesheet" href="assets/style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#2563eb" />
   </head>
   <body>
     <header>
@@ -95,6 +97,7 @@
       const search = document.getElementById('search');
 
       const localContactsKey = 'myles-crm-contacts';
+      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
       let contacts = [];
       let selectedContactId = '';
 
@@ -145,8 +148,21 @@
         localStorage.setItem(localContactsKey, JSON.stringify(localContacts));
       }
 
+      function loadCachedCloudContacts() {
+        try {
+          return JSON.parse(localStorage.getItem(cloudContactsCacheKey) || '[]').map((contact) => normaliseContact(contact, 'cloud'));
+        } catch (error) {
+          console.warn('Could not read cached cloud contacts', error);
+          return [];
+        }
+      }
+
+      function saveCachedCloudContacts(cloudContacts) {
+        localStorage.setItem(cloudContactsCacheKey, JSON.stringify(cloudContacts));
+      }
+
       async function loadCloudContacts() {
-        if (!window.supabase) return [];
+        if (!window.supabase) return loadCachedCloudContacts();
 
         const { data, error } = await window.supabase
           .from('contacts')
@@ -157,10 +173,13 @@
 
         if (error) {
           console.warn('Could not load cloud contacts', error);
-          return [];
+          formStatus.textContent = 'Offline — showing last saved cloud contacts on this device.';
+          return loadCachedCloudContacts();
         }
 
-        return (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+        const cloudContacts = (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+        saveCachedCloudContacts(cloudContacts);
+        return cloudContacts;
       }
 
       async function saveCloudContact(contact) {

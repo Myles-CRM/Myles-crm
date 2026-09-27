@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Myles CRM — Calendar</title>
     <link rel="stylesheet" href="assets/style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#2563eb" />
   </head>
   <body>
     <header>
@@ -173,6 +175,8 @@
       const localStorageKey = 'myles-crm-calendar-events';
       const calendarFeedsKey = 'myles-crm-calendar-feeds';
       const localContactsKey = 'myles-crm-contacts';
+      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
+      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
       const importRefreshHour = 5;
       const reminderEmailAddress = 'tacotrumpet001@gmail.com';
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -259,8 +263,21 @@
         }
       }
 
+      function loadCachedCloudContacts() {
+        try {
+          return JSON.parse(localStorage.getItem(cloudContactsCacheKey) || '[]').map((contact) => normaliseContact(contact, 'cloud'));
+        } catch (error) {
+          console.warn('Could not read cached cloud contacts', error);
+          return [];
+        }
+      }
+
+      function saveCachedCloudContacts(cloudContacts) {
+        localStorage.setItem(cloudContactsCacheKey, JSON.stringify(cloudContacts));
+      }
+
       async function loadCloudContacts() {
-        if (!window.supabase) return [];
+        if (!window.supabase) return loadCachedCloudContacts();
 
         const { data, error } = await window.supabase
           .from('contacts')
@@ -271,10 +288,12 @@
 
         if (error) {
           console.warn('Could not load cloud contacts', error);
-          return [];
+          return loadCachedCloudContacts();
         }
 
-        return (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+        const cloudContacts = (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+        saveCachedCloudContacts(cloudContacts);
+        return cloudContacts;
       }
 
       function getLinkedContactNames(event) {
@@ -511,8 +530,21 @@
         });
       }
 
+      function loadCachedCloudEvents() {
+        try {
+          return JSON.parse(localStorage.getItem(cloudEventsCacheKey) || '[]').map((event) => normaliseEvent(event, 'cloud'));
+        } catch (error) {
+          console.warn('Could not read cached cloud calendar events', error);
+          return [];
+        }
+      }
+
+      function saveCachedCloudEvents(cloudEvents) {
+        localStorage.setItem(cloudEventsCacheKey, JSON.stringify(cloudEvents));
+      }
+
       async function loadCloudEvents() {
-        if (!window.supabase) return [];
+        if (!window.supabase) return loadCachedCloudEvents();
 
         const { data, error } = await window.supabase
           .from('events')
@@ -523,10 +555,12 @@
 
         if (error) {
           console.warn('Could not load cloud calendar events', error);
-          return [];
+          return loadCachedCloudEvents();
         }
 
-        return (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
+        const cloudEvents = (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
+        saveCachedCloudEvents(cloudEvents);
+        return cloudEvents;
       }
 
       async function saveCloudEvent(event) {
