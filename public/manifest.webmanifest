@@ -1,0 +1,10 @@
+{
+  "name": "Myles CRM",
+  "short_name": "Myles CRM",
+  "description": "Myles CRM with offline viewing for core pages.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb"
+}
