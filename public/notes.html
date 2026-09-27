@@ -41,7 +41,7 @@
             <button id="saveNotes" type="button">Save Notes</button>
           </div>
 
-          <textarea id="notesArea" class="notes-editor" rows="18" placeholder="Write your notes here…"></textarea>
+          <textarea id="notesArea" class="notes-editor" rows="18" placeholder="• Write your notes here…"></textarea>
 
           <div class="notes-status-row">
             <span id="status" role="status">Loading…</span>
@@ -104,6 +104,28 @@
         statusEl.textContent = message;
       }
 
+      function makeBulletNotes(content = '') {
+        if (!content.trim()) return '• ';
+        return content
+          .split('\n')
+          .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return '';
+            if (/^(•|-|\*)\s+/.test(trimmed)) return trimmed.replace(/^[-*]\s+/, '• ');
+            return `• ${trimmed}`;
+          })
+          .join('\n');
+      }
+
+      function insertAtCursor(text) {
+        const start = notesArea.selectionStart;
+        const end = notesArea.selectionEnd;
+        notesArea.value = `${notesArea.value.slice(0, start)}${text}${notesArea.value.slice(end)}`;
+        const position = start + text.length;
+        notesArea.selectionStart = position;
+        notesArea.selectionEnd = position;
+      }
+
       function renderTabs() {
         notesTabs.innerHTML = '';
         noteCategories.forEach((category) => {
@@ -129,7 +151,7 @@
       }
 
       function showCachedNotes(tab, message) {
-        notesArea.value = loadCachedNotes(tab);
+        notesArea.value = makeBulletNotes(loadCachedNotes(tab));
         isDirty = false;
         setStatus(message);
       }
@@ -157,7 +179,7 @@
           return;
         }
 
-        const latest = data.length ? data[data.length - 1].content : '';
+        const latest = makeBulletNotes(data.length ? data[data.length - 1].content : '');
         cacheNotes(tab, latest);
         notesArea.value = latest;
         isDirty = false;
@@ -165,7 +187,8 @@
       }
 
       async function saveCurrentNotes() {
-        const content = notesArea.value;
+        const content = makeBulletNotes(notesArea.value);
+        notesArea.value = content;
         cacheNotes(currentTab, content);
         saveNotesButton.disabled = true;
         setStatus('Saving notes…');
@@ -194,10 +217,47 @@
         await loadCloud(currentTab);
       }
 
+      notesArea.addEventListener('focus', () => {
+        if (!notesArea.value.trim()) {
+          notesArea.value = '• ';
+          notesArea.selectionStart = notesArea.value.length;
+          notesArea.selectionEnd = notesArea.value.length;
+        }
+      });
+
+      notesArea.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        const beforeCursor = notesArea.value.slice(0, notesArea.selectionStart);
+        const currentLine = beforeCursor.split('\n').pop() || '';
+        if (/^\s*•\s*$/.test(currentLine)) {
+          event.preventDefault();
+          const lineStart = beforeCursor.lastIndexOf('\n') + 1;
+          notesArea.value = `${notesArea.value.slice(0, lineStart)}${notesArea.value.slice(notesArea.selectionStart)}`;
+          notesArea.selectionStart = lineStart;
+          notesArea.selectionEnd = lineStart;
+          isDirty = true;
+          cacheNotes(currentTab, notesArea.value);
+          setStatus('Unsaved changes.');
+          return;
+        }
+        if (/^\s*•\s+/.test(currentLine) || !currentLine.trim()) {
+          event.preventDefault();
+          insertAtCursor('\n• ');
+          isDirty = true;
+          cacheNotes(currentTab, notesArea.value);
+          setStatus('Unsaved changes.');
+        }
+      });
+
       notesArea.addEventListener('input', () => {
         isDirty = true;
         cacheNotes(currentTab, notesArea.value);
         setStatus('Unsaved changes.');
+      });
+
+      notesArea.addEventListener('blur', () => {
+        notesArea.value = makeBulletNotes(notesArea.value);
+        cacheNotes(currentTab, notesArea.value);
       });
 
       saveNotesButton.addEventListener('click', saveCurrentNotes);

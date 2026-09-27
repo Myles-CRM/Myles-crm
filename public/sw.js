@@ -1,4 +1,4 @@
-const CACHE_NAME = 'myles-crm-offline-v2';
+const CACHE_NAME = 'myles-crm-offline-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
