@@ -54,14 +54,41 @@
             <input name="first_name" placeholder="First name" autocomplete="given-name" required />
             <input name="last_name" placeholder="Last name" autocomplete="family-name" required />
           </div>
-          <div class="two-column-form">
-            <input name="phone" type="tel" placeholder="Phone" autocomplete="tel" />
-            <input name="email" type="email" placeholder="Email" autocomplete="email" />
+          <input name="phone" type="tel" placeholder="Phone" autocomplete="tel" />
+
+          <div class="multi-entry-card" data-entry-type="professions">
+            <div class="multi-entry-header">
+              <div>
+                <p class="eyebrow">Professions</p>
+                <h3>Roles / jobs</h3>
+              </div>
+              <button type="button" class="secondary-button" data-action="add-profession">+ Add</button>
+            </div>
+            <div id="professionFields" class="multi-entry-list"></div>
           </div>
-          <div class="two-column-form">
-            <input name="address" placeholder="Address" autocomplete="street-address" />
-            <input name="profession" placeholder="Role / profession" />
+
+          <div class="multi-entry-card" data-entry-type="emails">
+            <div class="multi-entry-header">
+              <div>
+                <p class="eyebrow">Emails</p>
+                <h3>Email addresses</h3>
+              </div>
+              <button type="button" class="secondary-button" data-action="add-email">+ Add</button>
+            </div>
+            <div id="emailFields" class="multi-entry-list"></div>
           </div>
+
+          <div class="multi-entry-card" data-entry-type="addresses">
+            <div class="multi-entry-header">
+              <div>
+                <p class="eyebrow">Addresses</p>
+                <h3>Places</h3>
+              </div>
+              <button type="button" class="secondary-button" data-action="add-address">+ Add</button>
+            </div>
+            <div id="addressFields" class="multi-entry-list"></div>
+          </div>
+
           <textarea name="notes" rows="4" placeholder="Notes"></textarea>
           <div class="row form-actions-row">
             <button id="addContactButton" type="submit">Add Contact</button>
@@ -99,9 +126,13 @@
       const contactEditorEyebrow = document.getElementById('contactEditorEyebrow');
       const contactEditorTitle = document.getElementById('contactEditorTitle');
       const cancelContactEditButton = document.getElementById('cancelContactEdit');
+      const professionFields = document.getElementById('professionFields');
+      const emailFields = document.getElementById('emailFields');
+      const addressFields = document.getElementById('addressFields');
 
       const localContactsKey = 'myles-crm-contacts';
       const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const entryLabels = ['home', 'work', 'school', 'other'];
       let contacts = [];
       let selectedContactId = '';
       let editingContactId = '';
@@ -126,18 +157,78 @@
         return `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Unnamed contact';
       }
 
+      function parseEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value);
+        return String(value || '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            if (line.includes('|')) {
+              const [label, ...rest] = line.split('|');
+              return { label: label.trim().toLowerCase() || 'home', value: rest.join('|').trim() };
+            }
+            if (line.includes(':')) {
+              const [label, ...rest] = line.split(':');
+              const cleanLabel = label.trim().toLowerCase();
+              if (entryLabels.includes(cleanLabel)) return { label: cleanLabel, value: rest.join(':').trim() };
+            }
+            return { label: 'home', value: line };
+          })
+          .filter((entry) => entry.value);
+      }
+
+      function normaliseEntries(entries = []) {
+        return entries
+          .map((entry) => ({
+            label: entryLabels.includes(String(entry.label || '').toLowerCase()) ? String(entry.label).toLowerCase() : 'home',
+            value: String(entry.value || '').trim(),
+          }))
+          .filter((entry) => entry.value);
+      }
+
+      function serialiseEntries(entries = []) {
+        return normaliseEntries(entries).map((entry) => `${entry.label}|${entry.value}`).join('\n');
+      }
+
+      function entryValue(entries = []) {
+        return normaliseEntries(entries)[0]?.value || '';
+      }
+
+      function entrySummary(entries = []) {
+        return normaliseEntries(entries).map((entry) => `${entry.label}: ${entry.value}`).join(' • ');
+      }
+
       function normaliseContact(contact, source) {
+        const emails = normaliseEntries(contact.emails || parseEntries(contact.email));
+        const addresses = normaliseEntries(contact.addresses || parseEntries(contact.address));
+        const professions = normaliseEntries(contact.professions || parseEntries(contact.profession));
         return {
           id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
           first_name: contact.first_name || '',
           last_name: contact.last_name || '',
           phone: contact.phone || '',
-          email: contact.email || '',
-          address: contact.address || '',
-          profession: contact.profession || '',
+          emails,
+          email: serialiseEntries(emails),
+          addresses,
+          address: serialiseEntries(addresses),
+          professions,
+          profession: serialiseEntries(professions),
           notes: contact.notes || '',
           source,
           created_at: contact.created_at || new Date().toISOString(),
+        };
+      }
+
+      function toCloudContactFields(contact) {
+        return {
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          phone: contact.phone,
+          email: serialiseEntries(contact.emails),
+          address: serialiseEntries(contact.addresses),
+          profession: serialiseEntries(contact.professions),
+          notes: contact.notes,
         };
       }
 
@@ -193,7 +284,7 @@
 
         const { data, error } = await window.supabase
           .from('contacts')
-          .insert([{ ...contact, created_by: 'Myles' }])
+          .insert([{ ...toCloudContactFields(contact), created_by: 'Myles' }])
           .select()
           .single();
 
@@ -206,7 +297,7 @@
 
         const { data, error } = await window.supabase
           .from('contacts')
-          .update(contact)
+          .update(toCloudContactFields(contact))
           .eq('id', contactId)
           .select()
           .single();
@@ -258,16 +349,17 @@
         }
       }
 
+      function contactSearchText(contact) {
+        return [
+          fullName(contact), contact.phone, contact.notes,
+          entrySummary(contact.emails), entrySummary(contact.addresses), entrySummary(contact.professions),
+        ].join(' ').toLowerCase();
+      }
+
       function filteredContacts() {
         const query = search.value.trim().toLowerCase();
         if (!query) return contacts;
-
-        return contacts.filter((contact) =>
-          [fullName(contact), contact.email, contact.phone, contact.address, contact.profession, contact.notes]
-            .join(' ')
-            .toLowerCase()
-            .includes(query)
-        );
+        return contacts.filter((contact) => contactSearchText(contact).includes(query));
       }
 
       function renderContactList() {
@@ -290,6 +382,7 @@
         visibleContacts.forEach((contact) => {
           const item = document.createElement('li');
           const button = document.createElement('button');
+          const subtitle = entryValue(contact.professions) || entryValue(contact.emails) || contact.phone || 'No details yet';
           button.type = 'button';
           button.className = 'contact-row';
           if (contact.id === selectedContactId) button.classList.add('active');
@@ -297,7 +390,7 @@
             <span class="contact-avatar">${escapeText(initialsFor(contact))}</span>
             <span class="contact-row-text">
               <strong>${escapeText(fullName(contact))}</strong>
-              <small>${escapeText(contact.profession || contact.email || contact.phone || 'No details yet')}</small>
+              <small>${escapeText(subtitle)}</small>
             </span>
           `;
           button.addEventListener('click', () => {
@@ -319,6 +412,14 @@
         return `<div class="contact-detail-line"><span>${label}</span><strong>${content}</strong></div>`;
       }
 
+      function detailEntries(label, entries, hrefBuilder) {
+        return normaliseEntries(entries).map((entry) => {
+          const text = `${entry.label}: ${entry.value}`;
+          const href = hrefBuilder ? hrefBuilder(entry.value) : '';
+          return detailLine(label, text, href);
+        }).join('');
+      }
+
       function renderSelectedContact() {
         const contact = contacts.find((item) => item.id === selectedContactId);
         if (!contact) {
@@ -331,22 +432,25 @@
           return;
         }
 
+        const primaryEmail = entryValue(contact.emails);
+        const primaryAddress = entryValue(contact.addresses);
         contactDetail.className = 'contact-detail';
         contactDetail.innerHTML = `
           <div class="contact-avatar large">${escapeText(initialsFor(contact))}</div>
           <h2>${escapeText(fullName(contact))}</h2>
-          <p class="contact-subtitle">${escapeText(contact.profession || (contact.source === 'cloud' ? 'Cloud contact' : 'Saved on this device'))}</p>
+          <p class="contact-subtitle">${escapeText(entrySummary(contact.professions) || (contact.source === 'cloud' ? 'Cloud contact' : 'Saved on this device'))}</p>
           <div class="contact-action-row">
             ${contact.phone ? `<a class="contact-action" href="tel:${escapeText(contact.phone)}">Call</a>` : ''}
-            ${contact.email ? `<a class="contact-action" href="mailto:${escapeText(contact.email)}">Email</a>` : ''}
-            ${contact.address ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(contact.address)}">Map</a>` : ''}
+            ${primaryEmail ? `<a class="contact-action" href="mailto:${escapeText(primaryEmail)}">Email</a>` : ''}
+            ${primaryAddress ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(primaryAddress)}">Map</a>` : ''}
             <button class="contact-action" type="button" data-action="edit-contact">Edit</button>
             <button class="contact-action danger-action" type="button" data-action="delete-contact">Delete</button>
           </div>
           <div class="contact-detail-card">
             ${detailLine('mobile', contact.phone, contact.phone ? `tel:${contact.phone}` : '')}
-            ${detailLine('email', contact.email, contact.email ? `mailto:${contact.email}` : '')}
-            ${detailLine('address', contact.address)}
+            ${detailEntries('email', contact.emails, (value) => `mailto:${value}`)}
+            ${detailEntries('address', contact.addresses)}
+            ${detailEntries('role', contact.professions)}
             ${detailLine('notes', contact.notes)}
           </div>
         `;
@@ -358,10 +462,60 @@
         renderContactList();
       }
 
+      function createEntryRow(container, placeholder, entry = {}) {
+        const row = document.createElement('div');
+        row.className = 'multi-entry-row';
+
+        const select = document.createElement('select');
+        select.className = 'entry-label';
+        entryLabels.forEach((label) => {
+          const option = document.createElement('option');
+          option.value = label;
+          option.textContent = label[0].toUpperCase() + label.slice(1);
+          select.appendChild(option);
+        });
+        select.value = entryLabels.includes(String(entry.label || '').toLowerCase()) ? String(entry.label).toLowerCase() : 'home';
+
+        const input = document.createElement('input');
+        input.className = 'entry-value';
+        input.placeholder = placeholder;
+        input.value = entry.value || '';
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'secondary-button remove-entry-button';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => {
+          row.remove();
+          if (!container.querySelector('.multi-entry-row')) createEntryRow(container, placeholder);
+        });
+
+        row.append(select, input, removeButton);
+        container.appendChild(row);
+      }
+
+      function setEntryRows(container, placeholder, entries = []) {
+        container.innerHTML = '';
+        const cleanEntries = normaliseEntries(entries);
+        (cleanEntries.length ? cleanEntries : [{}]).forEach((entry) => createEntryRow(container, placeholder, entry));
+      }
+
+      function getEntryRows(container) {
+        return Array.from(container.querySelectorAll('.multi-entry-row'))
+          .map((row) => ({
+            label: row.querySelector('.entry-label').value,
+            value: row.querySelector('.entry-value').value,
+          }))
+          .filter((entry) => entry.value.trim());
+      }
+
       function resetContactEditor() {
         editingContactId = '';
         editingContactSource = '';
         contactForm.reset();
+        setEntryRows(professionFields, 'Profession / role');
+        setEntryRows(emailFields, 'Email address');
+        setEntryRows(addressFields, 'Address');
         contactEditorEyebrow.textContent = 'New contact';
         contactEditorTitle.textContent = 'Add someone';
         addContactButton.textContent = 'Add Contact';
@@ -374,10 +528,10 @@
         contactForm.elements.first_name.value = contact.first_name || '';
         contactForm.elements.last_name.value = contact.last_name || '';
         contactForm.elements.phone.value = contact.phone || '';
-        contactForm.elements.email.value = contact.email || '';
-        contactForm.elements.address.value = contact.address || '';
-        contactForm.elements.profession.value = contact.profession || '';
         contactForm.elements.notes.value = contact.notes || '';
+        setEntryRows(professionFields, 'Profession / role', contact.professions);
+        setEntryRows(emailFields, 'Email address', contact.emails);
+        setEntryRows(addressFields, 'Address', contact.addresses);
         contactEditorEyebrow.textContent = 'Edit contact';
         contactEditorTitle.textContent = `Edit ${fullName(contact)}`;
         addContactButton.textContent = 'Save Changes';
@@ -386,10 +540,23 @@
         contactForm.elements.first_name.focus();
       }
 
+      function collectContactFromForm(source = 'local', id = '') {
+        const formData = new FormData(contactForm);
+        return normaliseContact({
+          id,
+          first_name: String(formData.get('first_name') || '').trim(),
+          last_name: String(formData.get('last_name') || '').trim(),
+          phone: String(formData.get('phone') || '').trim(),
+          emails: getEntryRows(emailFields),
+          addresses: getEntryRows(addressFields),
+          professions: getEntryRows(professionFields),
+          notes: String(formData.get('notes') || '').trim(),
+        }, source);
+      }
+
       contactForm.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const formData = new FormData(contactForm);
-        const contact = normaliseContact(Object.fromEntries(formData.entries()), 'local');
+        const contact = collectContactFromForm(editingContactSource || 'local', editingContactId || '');
 
         if (!contact.first_name.trim() || !contact.last_name.trim()) {
           formStatus.textContent = 'First and last name are needed.';
@@ -399,38 +566,27 @@
         addContactButton.disabled = true;
         formStatus.textContent = editingContactId ? 'Saving changes…' : 'Saving…';
 
-        const contactFields = {
-          first_name: contact.first_name.trim(),
-          last_name: contact.last_name.trim(),
-          phone: contact.phone.trim(),
-          email: contact.email.trim(),
-          address: contact.address.trim(),
-          profession: contact.profession.trim(),
-          notes: contact.notes.trim(),
-        };
-
         try {
           let savedContact;
           if (editingContactId) {
-            if (editingContactSource === 'cloud') savedContact = await updateCloudContact(editingContactId, contactFields);
-            else savedContact = updateLocalContact(editingContactId, contactFields);
+            if (editingContactSource === 'cloud') savedContact = await updateCloudContact(editingContactId, contact);
+            else savedContact = updateLocalContact(editingContactId, contact);
             selectedContactId = savedContact.id;
             formStatus.textContent = editingContactSource === 'cloud' ? 'Changes saved to cloud.' : 'Changes saved on this device.';
           } else {
-            savedContact = await saveCloudContact(contactFields);
+            savedContact = await saveCloudContact(contact);
             selectedContactId = savedContact.id;
             formStatus.textContent = 'Saved to cloud.';
           }
         } catch (error) {
           if (editingContactId) {
             console.warn('Could not update cloud contact', error);
-            const cachedContact = normaliseContact({ ...contactFields, id: editingContactId }, editingContactSource || 'local');
             if (editingContactSource === 'cloud') {
               saveCachedCloudContacts(loadCachedCloudContacts().map((savedContact) =>
-                String(savedContact.id) === String(editingContactId) ? cachedContact : savedContact
+                String(savedContact.id) === String(editingContactId) ? normaliseContact({ ...contact, id: editingContactId }, 'cloud') : savedContact
               ));
             } else {
-              updateLocalContact(editingContactId, contactFields);
+              updateLocalContact(editingContactId, contact);
             }
             selectedContactId = editingContactId;
             formStatus.textContent = 'Saved on this device. Cloud saving was not available.';
@@ -468,7 +624,14 @@
         formStatus.textContent = 'Edit cancelled.';
       });
 
+      contactForm.addEventListener('click', (event) => {
+        if (event.target.closest('[data-action="add-profession"]')) createEntryRow(professionFields, 'Profession / role');
+        if (event.target.closest('[data-action="add-email"]')) createEntryRow(emailFields, 'Email address');
+        if (event.target.closest('[data-action="add-address"]')) createEntryRow(addressFields, 'Address');
+      });
+
       search.addEventListener('input', renderContactList);
+      resetContactEditor();
       refreshContacts();
     </script>
     <!-- END: Contacts cloud script -->

@@ -183,3 +183,17 @@ footer { padding:16px; color:var(--muted); text-align:center; }
   .notes-editor { min-height:360px; padding:18px; font-size:16px; }
   .notes-status-row { align-items:flex-start; flex-direction:column; }
 }
+
+/* Contact multi-entry fields */
+.multi-entry-card { background:#0b0f14; border:1px solid var(--border); border-radius:18px; padding:12px; }
+.multi-entry-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.multi-entry-header h3 { margin:0; font-size:18px; letter-spacing:-0.02em; }
+.multi-entry-list { display:flex; flex-direction:column; gap:8px; }
+.multi-entry-row { display:grid; grid-template-columns:120px minmax(0, 1fr) auto; gap:8px; align-items:center; }
+.multi-entry-row select, .multi-entry-row input { width:100%; }
+.remove-entry-button { color:#ffb4b8; border-color:rgba(255, 69, 58, 0.35); }
+
+@media (max-width: 620px) {
+  .multi-entry-row { grid-template-columns:1fr; }
+  .remove-entry-button { width:100%; }
+}
