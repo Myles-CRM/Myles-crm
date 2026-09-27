@@ -56,7 +56,7 @@
 
             <div class="quick-add-card">
               <p class="eyebrow">Quick add</p>
-              <h3>Add an event</h3>
+              <h3 id="eventEditorTitle">Add an event</h3>
               <div class="stacked-form event-editor-form">
                 <div class="event-title-card">
                   <input id="eventTitle" placeholder="Title" autocomplete="off" />
@@ -95,7 +95,10 @@
                 <label>Linked contacts
                   <select id="eventContacts" multiple size="4"></select>
                 </label>
-                <button id="addEvent" type="button">Add Event</button>
+                <div class="row form-actions-row">
+                  <button id="addEvent" type="button">Add Event</button>
+                  <button id="cancelEventEdit" type="button" class="secondary-button hidden">Cancel</button>
+                </div>
               </div>
               <p id="eventSaveStatus" class="hint">Events save to Supabase when cloud saving is available, with this device as a backup.</p>
             </div>
@@ -162,6 +165,8 @@
       const eventRepeat = document.getElementById('eventRepeat');
       const eventContacts = document.getElementById('eventContacts');
       const addEventButton = document.getElementById('addEvent');
+      const cancelEventEditButton = document.getElementById('cancelEventEdit');
+      const eventEditorTitle = document.getElementById('eventEditorTitle');
       const eventSaveStatus = document.getElementById('eventSaveStatus');
       const calendarImportUrl = document.getElementById('calendarImportUrl');
       const addCalendarFeedButton = document.getElementById('addCalendarFeed');
@@ -187,6 +192,8 @@
       let selectedDate = toDateKey(new Date());
       let events = [];
       let contacts = [];
+      let editingEventId = '';
+      let editingEventSource = '';
 
       function startOfMonth(date) {
         return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -582,6 +589,37 @@
         return normaliseEvent(data, 'cloud');
       }
 
+      async function updateCloudEvent(eventId, event) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+
+        const { data, error } = await window.supabase
+          .from('events')
+          .update({
+            title: event.title,
+            date: event.date,
+            time: event.time,
+            location: event.location,
+          })
+          .eq('id', eventId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return normaliseEvent(data, 'cloud');
+      }
+
+      function upsertLocalEvent(savedEvent) {
+        const localEvents = loadLocalEvents();
+        const eventId = String(savedEvent.id);
+        const cloudEventId = savedEvent.cloudEventId ? String(savedEvent.cloudEventId) : '';
+        const index = localEvents.findIndex((event) =>
+          String(event.id) === eventId || (cloudEventId && String(event.cloudEventId) === cloudEventId)
+        );
+        if (index === -1) localEvents.push(savedEvent);
+        else localEvents[index] = savedEvent;
+        saveLocalEvents(localEvents);
+      }
+
       function getReminderDueAt(event) {
         if (!event.reminder || event.reminder === 'none') return '';
 
@@ -817,13 +855,21 @@
           source.className = `source-pill ${event.source}`;
           source.textContent = getSourceLabel(event);
 
+          const editButton = document.createElement('button');
+          editButton.type = 'button';
+          editButton.className = 'delete-button edit-button';
+          editButton.textContent = 'Edit';
+          editButton.disabled = event.source === 'import';
+          editButton.title = event.source === 'import' ? 'Imported events cannot be edited here yet.' : 'Edit event';
+          editButton.addEventListener('click', () => startEditEvent(event));
+
           const deleteButton = document.createElement('button');
           deleteButton.type = 'button';
           deleteButton.className = 'delete-button';
           deleteButton.textContent = 'Delete';
           deleteButton.addEventListener('click', () => deleteEvent(event));
 
-          item.append(time, eventDetails, source, deleteButton);
+          item.append(time, eventDetails, source, editButton, deleteButton);
           container.appendChild(item);
         });
       }
@@ -869,65 +915,30 @@
         renderSelectedDay();
       }
 
-      addEventButton.addEventListener('click', async () => {
-        const title = eventTitle.value.trim();
+      function collectEventDraft(id = `local-${Date.now()}`) {
         const date = eventDate.value || selectedDate;
-        const time = eventAllDay.checked ? '' : eventTime.value;
-        const endDate = eventEndDate.value || date;
-        const endTime = eventAllDay.checked ? '' : eventEndTime.value;
-        const location = eventLocation.value.trim();
-        const linkedContactIds = Array.from(eventContacts.selectedOptions).map((option) => option.value);
-
-        if (!title || !date) return;
-
-        const eventDraft = {
-          id: `local-${Date.now()}`,
-          title,
+        return {
+          id,
+          title: eventTitle.value.trim(),
           date,
-          time,
-          endDate,
-          endTime,
+          time: eventAllDay.checked ? '' : eventTime.value,
+          endDate: eventEndDate.value || date,
+          endTime: eventAllDay.checked ? '' : eventEndTime.value,
           allDay: eventAllDay.checked,
-          location,
+          location: eventLocation.value.trim(),
           reminder: eventReminder.value,
           reminderEmail: eventReminder.value === 'none' ? '' : reminderEmailAddress,
           repeat: eventRepeat.value,
-          linkedContactIds,
+          linkedContactIds: Array.from(eventContacts.selectedOptions).map((option) => option.value),
         };
+      }
 
-        addEventButton.disabled = true;
-        eventSaveStatus.textContent = 'Saving event…';
-        const localEvents = loadLocalEvents();
-
-        try {
-          const cloudEvent = await saveCloudEvent(eventDraft);
-          let reminderResult = { saved: false, skipped: true };
-          try {
-            reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
-          } catch (reminderError) {
-            console.warn('Could not save reminder row', reminderError);
-          }
-          localEvents.push({
-            ...eventDraft,
-            id: `cloud-meta-${cloudEvent.id}`,
-            cloudEventId: String(cloudEvent.id),
-            isCloudMeta: true,
-          });
-          saveLocalEvents(localEvents);
-          if (eventDraft.reminder !== 'none' && reminderResult.saved) {
-            eventSaveStatus.textContent = 'Saved to Supabase. Email reminder is queued.';
-          } else if (eventDraft.reminder !== 'none') {
-            eventSaveStatus.textContent = 'Saved to Supabase. Reminder needs the event_reminders table before emails can send.';
-          } else {
-            eventSaveStatus.textContent = 'Saved to Supabase.';
-          }
-        } catch (error) {
-          console.warn('Could not save event to Supabase', error);
-          localEvents.push(eventDraft);
-          saveLocalEvents(localEvents);
-          eventSaveStatus.textContent = 'Saved on this device. Supabase saving was not available.';
-        }
-
+      function resetEventEditor(date = selectedDate) {
+        editingEventId = '';
+        editingEventSource = '';
+        eventEditorTitle.textContent = 'Add an event';
+        addEventButton.textContent = 'Add Event';
+        cancelEventEditButton.classList.add('hidden');
         eventTitle.value = '';
         eventTime.value = '';
         eventEndDate.value = date;
@@ -939,8 +950,112 @@
         eventReminder.value = 'none';
         eventRepeat.value = 'never';
         Array.from(eventContacts.options).forEach((option) => { option.selected = false; });
-        selectedDate = date;
-        visibleMonth = startOfMonth(parseDateKey(date));
+      }
+
+      function startEditEvent(event) {
+        if (event.source === 'import') return;
+        editingEventId = String(event.id);
+        editingEventSource = event.source;
+        eventEditorTitle.textContent = `Edit ${event.title}`;
+        addEventButton.textContent = 'Save Changes';
+        cancelEventEditButton.classList.remove('hidden');
+        eventTitle.value = event.title || '';
+        eventDate.value = event.date || selectedDate;
+        eventTime.value = event.time || '';
+        eventEndDate.value = event.endDate || event.date || selectedDate;
+        eventEndTime.value = event.endTime || '';
+        eventLocation.value = event.location || '';
+        eventAllDay.checked = Boolean(event.allDay);
+        eventTime.disabled = eventAllDay.checked;
+        eventEndTime.disabled = eventAllDay.checked;
+        eventReminder.value = event.reminder || 'none';
+        eventRepeat.value = event.repeat || 'never';
+        Array.from(eventContacts.options).forEach((option) => {
+          option.selected = (event.linkedContactIds || []).map(String).includes(String(option.value));
+        });
+        selectedDate = event.date || selectedDate;
+        visibleMonth = startOfMonth(parseDateKey(selectedDate));
+        renderCalendar();
+        renderSelectedDay();
+        document.querySelector('.quick-add-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        eventTitle.focus();
+      }
+
+      async function updateExistingEvent(eventDraft) {
+        const originalEvent = events.find((event) => String(event.id) === editingEventId && event.source === editingEventSource);
+        if (!originalEvent) throw new Error('Could not find event to update.');
+
+        if (editingEventSource === 'cloud') {
+          const cloudEvent = await updateCloudEvent(editingEventId, eventDraft);
+          await deleteCloudReminders(originalEvent);
+          let reminderResult = { saved: false, skipped: true };
+          try {
+            reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
+          } catch (reminderError) {
+            console.warn('Could not save updated reminder row', reminderError);
+          }
+          upsertLocalEvent({
+            ...eventDraft,
+            id: `cloud-meta-${cloudEvent.id}`,
+            cloudEventId: String(cloudEvent.id),
+            isCloudMeta: true,
+          });
+          return reminderResult.saved ? 'Changes saved to cloud. Email reminder is queued.' : 'Changes saved to cloud.';
+        }
+
+        upsertLocalEvent({ ...eventDraft, id: editingEventId });
+        return 'Changes saved on this device.';
+      }
+
+      addEventButton.addEventListener('click', async () => {
+        const eventDraft = collectEventDraft(editingEventId || `local-${Date.now()}`);
+        if (!eventDraft.title || !eventDraft.date) return;
+
+        addEventButton.disabled = true;
+        eventSaveStatus.textContent = editingEventId ? 'Saving changes…' : 'Saving event…';
+        const localEvents = loadLocalEvents();
+
+        try {
+          if (editingEventId) {
+            eventSaveStatus.textContent = await updateExistingEvent(eventDraft);
+          } else {
+            const cloudEvent = await saveCloudEvent(eventDraft);
+            let reminderResult = { saved: false, skipped: true };
+            try {
+              reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
+            } catch (reminderError) {
+              console.warn('Could not save reminder row', reminderError);
+            }
+            localEvents.push({
+              ...eventDraft,
+              id: `cloud-meta-${cloudEvent.id}`,
+              cloudEventId: String(cloudEvent.id),
+              isCloudMeta: true,
+            });
+            saveLocalEvents(localEvents);
+            if (eventDraft.reminder !== 'none' && reminderResult.saved) {
+              eventSaveStatus.textContent = 'Saved to Supabase. Email reminder is queued.';
+            } else if (eventDraft.reminder !== 'none') {
+              eventSaveStatus.textContent = 'Saved to Supabase. Reminder needs the event_reminders table before emails can send.';
+            } else {
+              eventSaveStatus.textContent = 'Saved to Supabase.';
+            }
+          }
+        } catch (error) {
+          console.warn('Could not save event to Supabase', error);
+          if (editingEventId) {
+            upsertLocalEvent({ ...eventDraft, id: editingEventId });
+            eventSaveStatus.textContent = 'Changes saved on this device. Cloud saving was not available.';
+          } else {
+            localEvents.push(eventDraft);
+            saveLocalEvents(localEvents);
+            eventSaveStatus.textContent = 'Saved on this device. Supabase saving was not available.';
+          }
+        }
+
+        selectedDate = eventDraft.date;
+        visibleMonth = startOfMonth(parseDateKey(eventDraft.date));
+        resetEventEditor(eventDraft.date);
         addEventButton.disabled = false;
         refreshEvents();
       });
@@ -976,6 +1091,11 @@
         importStatus.textContent = 'Refreshing imported calendars…';
         await refreshImportedCalendars(true);
         refreshEvents();
+      });
+
+      cancelEventEditButton.addEventListener('click', () => {
+        resetEventEditor(selectedDate);
+        eventSaveStatus.textContent = 'Edit cancelled.';
       });
 
       eventAllDay.addEventListener('change', () => {
