@@ -45,8 +45,8 @@
       <section id="contactEditor" class="card contact-editor-card" aria-label="Add contact form">
         <div class="calendar-toolbar compact">
           <div>
-            <p class="eyebrow">New contact</p>
-            <h2>Add someone</h2>
+            <p class="eyebrow" id="contactEditorEyebrow">New contact</p>
+            <h2 id="contactEditorTitle">Add someone</h2>
           </div>
         </div>
         <form id="contactForm" class="stacked-form">
@@ -65,6 +65,7 @@
           <textarea name="notes" rows="4" placeholder="Notes"></textarea>
           <div class="row form-actions-row">
             <button id="addContactButton" type="submit">Add Contact</button>
+            <button id="cancelContactEdit" type="button" class="secondary-button hidden">Cancel</button>
             <span id="formStatus" class="hint" role="status"></span>
           </div>
         </form>
@@ -95,11 +96,16 @@
       const list = document.getElementById('list');
       const newContactButton = document.getElementById('newContactButton');
       const search = document.getElementById('search');
+      const contactEditorEyebrow = document.getElementById('contactEditorEyebrow');
+      const contactEditorTitle = document.getElementById('contactEditorTitle');
+      const cancelContactEditButton = document.getElementById('cancelContactEdit');
 
       const localContactsKey = 'myles-crm-contacts';
       const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
       let contacts = [];
       let selectedContactId = '';
+      let editingContactId = '';
+      let editingContactSource = '';
 
       function escapeText(value = '') {
         return String(value)
@@ -193,6 +199,32 @@
 
         if (error) throw error;
         return normaliseContact(data, 'cloud');
+      }
+
+      async function updateCloudContact(contactId, contact) {
+        if (!window.supabase) throw new Error('Cloud is not available.');
+
+        const { data, error } = await window.supabase
+          .from('contacts')
+          .update(contact)
+          .eq('id', contactId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        const updatedContact = normaliseContact(data, 'cloud');
+        saveCachedCloudContacts(loadCachedCloudContacts().map((savedContact) =>
+          String(savedContact.id) === String(contactId) ? updatedContact : savedContact
+        ));
+        return updatedContact;
+      }
+
+      function updateLocalContact(contactId, contact) {
+        const updatedContact = normaliseContact({ ...contact, id: contactId }, 'local');
+        saveLocalContacts(loadLocalContacts().map((savedContact) =>
+          String(savedContact.id) === String(contactId) ? updatedContact : savedContact
+        ));
+        return updatedContact;
       }
 
       async function deleteCloudContact(contact) {
@@ -308,6 +340,7 @@
             ${contact.phone ? `<a class="contact-action" href="tel:${escapeText(contact.phone)}">Call</a>` : ''}
             ${contact.email ? `<a class="contact-action" href="mailto:${escapeText(contact.email)}">Email</a>` : ''}
             ${contact.address ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(contact.address)}">Map</a>` : ''}
+            <button class="contact-action" type="button" data-action="edit-contact">Edit</button>
             <button class="contact-action danger-action" type="button" data-action="delete-contact">Delete</button>
           </div>
           <div class="contact-detail-card">
@@ -325,6 +358,34 @@
         renderContactList();
       }
 
+      function resetContactEditor() {
+        editingContactId = '';
+        editingContactSource = '';
+        contactForm.reset();
+        contactEditorEyebrow.textContent = 'New contact';
+        contactEditorTitle.textContent = 'Add someone';
+        addContactButton.textContent = 'Add Contact';
+        cancelContactEditButton.classList.add('hidden');
+      }
+
+      function startEditContact(contact) {
+        editingContactId = String(contact.id);
+        editingContactSource = contact.source;
+        contactForm.elements.first_name.value = contact.first_name || '';
+        contactForm.elements.last_name.value = contact.last_name || '';
+        contactForm.elements.phone.value = contact.phone || '';
+        contactForm.elements.email.value = contact.email || '';
+        contactForm.elements.address.value = contact.address || '';
+        contactForm.elements.profession.value = contact.profession || '';
+        contactForm.elements.notes.value = contact.notes || '';
+        contactEditorEyebrow.textContent = 'Edit contact';
+        contactEditorTitle.textContent = `Edit ${fullName(contact)}`;
+        addContactButton.textContent = 'Save Changes';
+        cancelContactEditButton.classList.remove('hidden');
+        contactEditor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        contactForm.elements.first_name.focus();
+      }
+
       contactForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const formData = new FormData(contactForm);
@@ -336,40 +397,75 @@
         }
 
         addContactButton.disabled = true;
-        formStatus.textContent = 'Saving…';
+        formStatus.textContent = editingContactId ? 'Saving changes…' : 'Saving…';
+
+        const contactFields = {
+          first_name: contact.first_name.trim(),
+          last_name: contact.last_name.trim(),
+          phone: contact.phone.trim(),
+          email: contact.email.trim(),
+          address: contact.address.trim(),
+          profession: contact.profession.trim(),
+          notes: contact.notes.trim(),
+        };
 
         try {
-          const savedContact = await saveCloudContact({
-            first_name: contact.first_name.trim(),
-            last_name: contact.last_name.trim(),
-            phone: contact.phone.trim(),
-            email: contact.email.trim(),
-            address: contact.address.trim(),
-            profession: contact.profession.trim(),
-            notes: contact.notes.trim(),
-          });
-          selectedContactId = savedContact.id;
-          formStatus.textContent = 'Saved to cloud.';
+          let savedContact;
+          if (editingContactId) {
+            if (editingContactSource === 'cloud') savedContact = await updateCloudContact(editingContactId, contactFields);
+            else savedContact = updateLocalContact(editingContactId, contactFields);
+            selectedContactId = savedContact.id;
+            formStatus.textContent = editingContactSource === 'cloud' ? 'Changes saved to cloud.' : 'Changes saved on this device.';
+          } else {
+            savedContact = await saveCloudContact(contactFields);
+            selectedContactId = savedContact.id;
+            formStatus.textContent = 'Saved to cloud.';
+          }
         } catch (error) {
-          const localContacts = loadLocalContacts();
-          localContacts.push(contact);
-          saveLocalContacts(localContacts);
-          selectedContactId = contact.id;
-          formStatus.textContent = 'Saved on this device.';
+          if (editingContactId) {
+            console.warn('Could not update cloud contact', error);
+            const cachedContact = normaliseContact({ ...contactFields, id: editingContactId }, editingContactSource || 'local');
+            if (editingContactSource === 'cloud') {
+              saveCachedCloudContacts(loadCachedCloudContacts().map((savedContact) =>
+                String(savedContact.id) === String(editingContactId) ? cachedContact : savedContact
+              ));
+            } else {
+              updateLocalContact(editingContactId, contactFields);
+            }
+            selectedContactId = editingContactId;
+            formStatus.textContent = 'Saved on this device. Cloud saving was not available.';
+          } else {
+            const localContacts = loadLocalContacts();
+            localContacts.push(contact);
+            saveLocalContacts(localContacts);
+            selectedContactId = contact.id;
+            formStatus.textContent = 'Saved on this device.';
+          }
         }
 
-        contactForm.reset();
+        resetContactEditor();
         addContactButton.disabled = false;
         await refreshContacts();
       });
 
       contactDetail.addEventListener('click', (event) => {
         if (event.target.closest('[data-action="delete-contact"]')) deleteSelectedContact();
+        if (event.target.closest('[data-action="edit-contact"]')) {
+          const contact = contacts.find((item) => item.id === selectedContactId);
+          if (contact) startEditContact(contact);
+        }
       });
 
       newContactButton.addEventListener('click', () => {
+        resetContactEditor();
+        formStatus.textContent = '';
         contactEditor.scrollIntoView({ behavior: 'smooth', block: 'start' });
         contactForm.elements.first_name.focus();
+      });
+
+      cancelContactEditButton.addEventListener('click', () => {
+        resetContactEditor();
+        formStatus.textContent = 'Edit cancelled.';
       });
 
       search.addEventListener('input', renderContactList);

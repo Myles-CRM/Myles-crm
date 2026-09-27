@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Myles CRM — Notes</title>
+    <title>Myles CRM — Notes</title>
     <link rel="stylesheet" href="assets/style.css" />
     <link rel="manifest" href="manifest.webmanifest" />
     <meta name="theme-color" content="#2563eb" />
   </head>
   <body>
     <header>
-      <h1>Notes & Reminders</h1>
+      <h1>Myles CRM</h1>
       <nav>
         <a href="index.html">Home</a>
         <a href="notes.html" class="active">Notes</a>
@@ -18,30 +18,47 @@
         <a href="calendar.html">Calendar</a>
       </nav>
     </header>
-    <main>
-      <div class="tabs">
-        <button class="tab active" data-tab="guitar">Guitar</button>
-        <button class="tab" data-tab="trumpet">Trumpet</button>
-<button class="tab" data-tab="bass">Bass</button>
-        <button class="tab" data-tab="drums">Drums</button>
-        <button class="tab" data-tab="piano">Piano</button>
-        <button class="tab" data-tab="general">General</button>
-      </div>
-      <section>
-        <textarea id="notesArea" rows="12" placeholder="Cloud-read enabled (add via Buddy/API)"></textarea>
-        <div class="row">
-          <button id="saveNotes" disabled>Save Notes</button>
-          <span id="status"></span>
-        </div>
+
+    <main class="notes-page">
+      <section class="notes-shell card" aria-label="Notes app">
+        <aside class="notes-sidebar" aria-label="Note categories">
+          <div class="notes-toolbar">
+            <div>
+              <p class="eyebrow">Notes & reminders</p>
+              <h2>Folders</h2>
+            </div>
+          </div>
+          <div class="notes-category-list" id="notesTabs"></div>
+        </aside>
+
+        <section class="notes-editor-panel" aria-label="Selected note editor">
+          <div class="notes-editor-header">
+            <div>
+              <p class="eyebrow" id="categoryEyebrow">Homework</p>
+              <h2 id="categoryTitle">Homework Notes</h2>
+              <p class="hint" id="categoryHint">School tasks, study ideas, and things to remember.</p>
+            </div>
+            <button id="saveNotes" type="button">Save Notes</button>
+          </div>
+
+          <textarea id="notesArea" class="notes-editor" rows="18" placeholder="Write your notes here…"></textarea>
+
+          <div class="notes-status-row">
+            <span id="status" role="status">Loading…</span>
+            <span class="hint">Cloud saves when available, with a saved copy on this device.</span>
+          </div>
+        </section>
       </section>
     </main>
+
     <footer>
-      <small>Cloud data via Supabase.</small>
+      <small>Cloud data via Supabase. Notes also keep a local saved copy for offline viewing.</small>
     </footer>
-<!-- START: Supabase config (set your values) -->
+
+    <!-- START: Supabase config (set your values) -->
     <script>
       window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';
-      window.SUPABASE_ANON = 'PeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYnpqZWlwcnJhdGJ5am5zYmdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxOTEwMTQsImV4cCI6MjA5MTc2NzAxNH0.cQ5Ty5c4PsFFhXlKT6smGusvzCqAGJeKMVej_aDYi6M';
+      window.SUPABASE_ANON = 'PeyJhbG…Yi6M';
     </script>
     <!-- END: Supabase config -->
 
@@ -49,48 +66,142 @@
 
     <!-- START: Notes cloud script -->
     <script>
-      const tabs = document.querySelectorAll('.tab');
+      const noteCategories = [
+        { id: 'homework', name: 'Homework', icon: '📚', hint: 'School tasks, study ideas, and things to remember.' },
+        { id: 'guitar', name: 'Guitar', icon: '🎸', hint: 'Riffs, chords, practice plans, and reminders.' },
+        { id: 'trumpet', name: 'Trumpet', icon: '🎺', hint: 'Lesson notes, scales, songs, and practice goals.' },
+        { id: 'bass', name: 'Bass Guitar', icon: '🎵', hint: 'Bass lines, rhythm ideas, and practice notes.' },
+        { id: 'double-bass', name: 'Double Bass', icon: '🎻', hint: 'Double bass practice, pieces, and lesson notes.' },
+        { id: 'drums', name: 'Drums', icon: '🥁', hint: 'Grooves, fills, tempos, and practice routines.' },
+        { id: 'piano', name: 'Piano', icon: '🎹', hint: 'Pieces, chords, theory, and warmups.' },
+        { id: 'general', name: 'General', icon: '📝', hint: 'Anything else you want to remember.' },
+      ];
+
+      const notesTabs = document.getElementById('notesTabs');
       const notesArea = document.getElementById('notesArea');
       const statusEl = document.getElementById('status');
+      const saveNotesButton = document.getElementById('saveNotes');
+      const categoryTitle = document.getElementById('categoryTitle');
+      const categoryEyebrow = document.getElementById('categoryEyebrow');
+      const categoryHint = document.getElementById('categoryHint');
       const notesCachePrefix = 'myles-crm-notes-cache-';
-      let currentTab = 'guitar';
+      let currentTab = 'homework';
+      let isDirty = false;
+
+      function getCategory(tab) {
+        return noteCategories.find((category) => category.id === tab) || noteCategories[0];
+      }
 
       function loadCachedNotes(tab) {
         return localStorage.getItem(`${notesCachePrefix}${tab}`) || '';
       }
 
-      function showCachedNotes(tab, message) {
-        notesArea.value = loadCachedNotes(tab);
+      function cacheNotes(tab, content) {
+        localStorage.setItem(`${notesCachePrefix}${tab}`, content);
+      }
+
+      function setStatus(message) {
         statusEl.textContent = message;
       }
 
-      async function loadCloud(tab){
-if (!window.supabase) {
-          showCachedNotes(tab, 'Offline — showing last saved copy on this device.');
+      function renderTabs() {
+        notesTabs.innerHTML = '';
+        noteCategories.forEach((category) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'notes-category';
+          if (category.id === currentTab) button.classList.add('active');
+          button.dataset.tab = category.id;
+          button.innerHTML = `
+            <span class="notes-category-icon" aria-hidden="true">${category.icon}</span>
+            <span><strong>${category.name}</strong><small>${category.hint}</small></span>
+          `;
+          button.addEventListener('click', () => switchCategory(category.id));
+          notesTabs.appendChild(button);
+        });
+      }
+
+      function updateCategoryHeader() {
+        const category = getCategory(currentTab);
+        categoryEyebrow.textContent = category.name;
+        categoryTitle.textContent = `${category.name} Notes`;
+        categoryHint.textContent = category.hint;
+      }
+
+      function showCachedNotes(tab, message) {
+        notesArea.value = loadCachedNotes(tab);
+        isDirty = false;
+        setStatus(message);
+      }
+
+      async function loadCloud(tab) {
+        updateCategoryHeader();
+        renderTabs();
+        setStatus('Loading notes…');
+
+        if (!window.supabase) {
+          showCachedNotes(tab, 'Offline — showing the saved copy on this device.');
           return;
         }
+
         const { data, error } = await window.supabase
           .from('notes')
           .select('*')
           .eq('category', tab)
           .is('deleted_at', null)
           .order('created_at', { ascending: true });
+
         if (error) {
-          showCachedNotes(tab, 'Offline — showing last saved copy on this device.');
+          console.warn('Could not load cloud notes', error);
+          showCachedNotes(tab, 'Offline — showing the saved copy on this device.');
           return;
         }
-        const latest = data.length ? data[data.length-1].content : '';
-        localStorage.setItem(`${notesCachePrefix}${tab}`, latest);
-notesArea.value = latest;
-        statusEl.textContent = `Loaded ${tab} notes (${data.length}).`;
+
+        const latest = data.length ? data[data.length - 1].content : '';
+        cacheNotes(tab, latest);
+        notesArea.value = latest;
+        isDirty = false;
+        setStatus(`Loaded ${getCategory(tab).name} notes.`);
       }
 
-      tabs.forEach(t=>t.addEventListener('click', ()=>{
-        currentTab = t.dataset.tab;
-        tabs.forEach(x=>x.classList.toggle('active', x===t));
-        loadCloud(currentTab);
-      }));
+      async function saveCurrentNotes() {
+        const content = notesArea.value;
+        cacheNotes(currentTab, content);
+        saveNotesButton.disabled = true;
+        setStatus('Saving notes…');
 
+        try {
+          if (!window.supabase) throw new Error('Cloud is not available.');
+          const { error } = await window.supabase
+            .from('notes')
+            .insert([{ category: currentTab, content, created_by: 'Myles' }]);
+          if (error) throw error;
+          isDirty = false;
+          setStatus('Saved to cloud and this device.');
+        } catch (error) {
+          console.warn('Could not save cloud notes', error);
+          isDirty = false;
+          setStatus('Saved on this device. Cloud saving was not available.');
+        } finally {
+          saveNotesButton.disabled = false;
+        }
+      }
+
+      async function switchCategory(tab) {
+        if (tab === currentTab) return;
+        if (isDirty) await saveCurrentNotes();
+        currentTab = tab;
+        await loadCloud(currentTab);
+      }
+
+      notesArea.addEventListener('input', () => {
+        isDirty = true;
+        cacheNotes(currentTab, notesArea.value);
+        setStatus('Unsaved changes.');
+      });
+
+      saveNotesButton.addEventListener('click', saveCurrentNotes);
+      renderTabs();
       loadCloud(currentTab);
     </script>
     <!-- END: Notes cloud script -->
