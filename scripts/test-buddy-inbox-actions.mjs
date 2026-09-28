@@ -136,31 +136,34 @@ assert.equal(result.res.body.messages.length, 25, 'list should cap returned mess
 assert.ok(!('html_body' in result.res.body.messages[0]), 'list response should not expose raw html_body');
 assert.ok(!('text_body' in result.res.body.messages[0]), 'list response should not expose raw text_body');
 
+const bearerFake = createFakeSupabase(makeMessages(1));
 result = await run({
   method: 'POST',
   headers: { authorization: ['Bear', 'er'].join('') + ' ' + process.env.BUDDY_INBOX_ACTION_TOKEN },
   body: { action: 'create_note', messageIds: [uuid(1)] },
-});
+}, bearerFake);
 assert.equal(result.res.statusCode, 200, 'Bearer auth should reach create_note action');
-assert.equal(result.res.body.ok, false, 'create_note should require Buddy-written noteContent');
-assert.equal(result.fake.state.notes.length, 0, 'create_note without noteContent should not insert a note');
+assert.equal(result.res.body.ok, true, 'create_note should file selected emailed note text');
+assert.equal(bearerFake.state.notes.length, 1, 'create_note without Buddy override should insert the emailed note');
+assert.match(bearerFake.state.notes[0].content, /Text body 1/, 'filed note should use the selected email body');
+assert.match(bearerFake.state.notes[0].content, /Source email: Subject 1/, 'note should keep a source reference');
 
 const fake = createFakeSupabase(makeMessages(1));
 result = await run({
   method: 'POST',
   headers: { 'x-buddy-inbox-action-token': process.env.BUDDY_INBOX_ACTION_TOKEN },
-  body: { action: 'create_note', messageIds: [uuid(1)], noteContent: 'Buddy wrote this note deliberately.' },
+  body: { action: 'create_note', messageIds: [uuid(1)] },
 }, fake);
-assert.equal(result.res.body.ok, true, 'create_note with selected id and noteContent should succeed');
+assert.equal(result.res.body.ok, true, 'create_note with selected id should succeed');
 assert.equal(fake.state.notes.length, 1, 'first create_note should insert one note');
 assert.equal(fake.state.messages[0].status, 'noted', 'processed message should be marked noted');
+assert.match(fake.state.notes[0].content, /Text body 1/, 'note should come from Myles emailed note text');
 assert.match(fake.state.notes[0].content, /Source email: Subject 1/, 'note should keep a source reference');
-assert.doesNotMatch(fake.state.notes[0].content, /HTML body|Text body/, 'note should not copy raw email body automatically');
 
 result = await run({
   method: 'POST',
   headers: { 'x-buddy-inbox-action-token': process.env.BUDDY_INBOX_ACTION_TOKEN },
-  body: { action: 'create_note', messageIds: [uuid(1)], noteContent: 'Trying again should not duplicate.' },
+  body: { action: 'create_note', messageIds: [uuid(1)] },
 }, fake);
 assert.equal(result.res.body.processed, 0, 'retry should not process already-noted message');
 assert.equal(fake.state.notes.length, 1, 'retry should not create a duplicate note');

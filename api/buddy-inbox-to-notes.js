@@ -69,17 +69,20 @@ function safeDate(value) {
   return new Date(value).toLocaleString('en-AU', { timeZone: 'Australia/Adelaide' });
 }
 
-function buildBuddyNote(messages = [], noteContent = '') {
-  const writtenByBuddy = cleanText(noteContent, 6000);
-  if (!writtenByBuddy) {
-    return '';
-  }
+function emailNoteText(message) {
+  return cleanText(message.text_body || stripHtml(message.html_body || '') || message.summary || '', 6000);
+}
 
-  const sourceRefs = messages
-    .map((message) => `Source email: ${message.subject || '(no subject)'} — ${message.from_email || 'unknown sender'} — ${safeDate(message.received_at)}`)
-    .join('\n');
+function buildFiledNote(messages = [], noteContent = '') {
+  const buddyOverride = cleanText(noteContent, 6000);
+  const noteBlocks = messages.map((message) => {
+    const emailText = emailNoteText(message);
+    const body = buddyOverride || emailText || '(No readable note text was included.)';
+    const sourceRef = `Source email: ${message.subject || '(no subject)'} — ${message.from_email || 'unknown sender'} — ${safeDate(message.received_at)}`;
+    return `${body}\n\n${sourceRef}`;
+  });
 
-  return `${writtenByBuddy}\n\n${sourceRefs}`.slice(0, 8000);
+  return noteBlocks.join('\n\n---\n\n').slice(0, 8000);
 }
 
 function idList(value) {
@@ -119,17 +122,13 @@ async function createNoteFromMessages(supabase, req) {
     return { ok: true, processed: 0, message: 'No valid Buddy Inbox message ids were supplied.' };
   }
 
-  const writtenByBuddy = cleanText(req.body?.noteContent, 6000);
-  if (!writtenByBuddy) {
-    return { ok: false, processed: 0, error: 'Buddy noteContent is required before filing email into Notes.' };
-  }
 
   const { data: messages, error: claimError } = await supabase
     .from('buddy_inbox_messages')
     .update({ status: 'processing' })
     .in('id', ids)
     .in('status', REVIEWABLE_STATUSES)
-    .select('id, subject, from_email, received_at, summary, status');
+    .select('id, subject, from_email, received_at, summary, text_body, html_body, status');
 
   if (claimError) throw claimError;
   if (!messages?.length) {
@@ -137,7 +136,7 @@ async function createNoteFromMessages(supabase, req) {
   }
 
   try {
-    const content = buildBuddyNote(messages, writtenByBuddy);
+    const content = buildFiledNote(messages, req.body?.noteContent);
     const { data: note, error: noteError } = await supabase
       .from('notes')
       .insert([{ category: req.body?.category || 'general', content, created_by: 'Buddy' }])
