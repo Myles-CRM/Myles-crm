@@ -51,7 +51,7 @@
           <ol class="setup-list">
             <li>You forward a useful email to Buddy's address.</li>
             <li>The email service sends it to the secure CRM webhook.</li>
-            <li>The CRM saves it in Buddy Inbox for Buddy to summarise or turn into notes, reminders, contacts, or calendar items.</li>
+            <li>The CRM saves it in Buddy Inbox so Buddy can review it before making notes, reminders, contacts, or calendar items.</li>
           </ol>
         </article>
 
@@ -79,13 +79,17 @@
         </article>
 
         <article class="card">
-          <p class="eyebrow">Inbox tools</p>
-          <h2>Turn inbox emails into notes</h2>
-          <p class="hint">Paste the Buddy webhook token here to append new Buddy Inbox emails to General Notes. The token is sent as a private request header, not saved in the page.</p>
-          <label class="field-label" for="inboxToken">Webhook token</label>
-          <input id="inboxToken" class="text-input" type="password" autocomplete="off" placeholder="Paste token here" />
-          <button id="processInbox" type="button">Add new inbox emails to Notes</button>
-          <p id="processStatus" class="hint" role="status">Ready when you are.</p>
+          <p class="eyebrow">Buddy-controlled</p>
+          <h2>Inbox first, Notes only when useful</h2>
+          <p class="hint">
+            Emails stay in the private Buddy Inbox until Buddy reviews them. Buddy can then choose to
+            make a clean note, mark the email as reviewed, archive it, or use the details for a reminder.
+          </p>
+          <ul class="check-list">
+            <li>No button that dumps every email into Notes.</li>
+            <li>No webhook token pasted into the public CRM page.</li>
+            <li>Notes are written deliberately by Buddy, not automatically copied from emails.</li>
+          </ul>
         </article>
 
         <article class="card">
@@ -95,8 +99,9 @@
             <li><code>SUPABASE_SERVICE_KEY</code> — lets the server save private inbox messages.</li>
             <li><code>RESEND_API_KEY</code> — lets the server read the full forwarded email body.</li>
             <li><code>BUDDY_INBOX_WEBHOOK_TOKEN</code> — secret token to stop random posts.</li>
+            <li><code>BUDDY_INBOX_ACTION_TOKEN</code> — separate private token so Buddy can review/file inbox messages.</li>
             <li><code>BUDDY_INBOX_ALLOWED_TO</code> — the Buddy email address allowed to receive.</li>
-            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox?token=***</code>.</li>
+            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox</code> with the webhook secret configured privately.</li>
           </ul>
         </article>
       </section>
@@ -122,43 +127,5 @@
     </footer>
 
     <script src="assets/common.js"></script>
-    <script>
-      const inboxTokenInput = document.getElementById('inboxToken');
-      const processInboxButton = document.getElementById('processInbox');
-      const processStatus = document.getElementById('processStatus');
-
-      processInboxButton.addEventListener('click', async () => {
-        const token = inboxTokenInput.value.trim();
-        if (!token) {
-          processStatus.textContent = 'Paste the webhook token first.';
-          return;
-        }
-
-        processInboxButton.disabled = true;
-        processStatus.textContent = 'Adding new Buddy Inbox emails to General Notes…';
-
-        try {
-          const response = await fetch('/api/buddy-inbox-to-notes', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-buddy-inbox-token': token,
-            },
-            body: JSON.stringify({ limit: 5 }),
-          });
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok || !result.ok) {
-            throw new Error(result.error || 'Could not process Buddy Inbox emails.');
-          }
-          processStatus.textContent = result.processed
-            ? `Added ${result.processed} email${result.processed === 1 ? '' : 's'} to General Notes.`
-            : 'No new Buddy Inbox emails to add.';
-        } catch (error) {
-          processStatus.textContent = error.message || 'Could not process Buddy Inbox emails.';
-        } finally {
-          processInboxButton.disabled = false;
-        }
-      });
-    </script>
   </body>
 </html>
