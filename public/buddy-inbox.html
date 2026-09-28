@@ -79,14 +79,24 @@
         </article>
 
         <article class="card">
-          <p class="eyebrow">Dad setup checklist</p>
-          <h2>What Dad adds later</h2>
+          <p class="eyebrow">Inbox tools</p>
+          <h2>Turn inbox emails into notes</h2>
+          <p class="hint">Paste the Buddy webhook token here to append new Buddy Inbox emails to General Notes. The token is sent as a private request header, not saved in the page.</p>
+          <label class="field-label" for="inboxToken">Webhook token</label>
+          <input id="inboxToken" class="text-input" type="password" autocomplete="off" placeholder="Paste token here" />
+          <button id="processInbox" type="button">Add new inbox emails to Notes</button>
+          <p id="processStatus" class="hint" role="status">Ready when you are.</p>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Setup checklist</p>
+          <h2>Connected settings</h2>
           <ul class="setup-list code-list">
             <li><code>SUPABASE_SERVICE_KEY</code> — lets the server save private inbox messages.</li>
             <li><code>RESEND_API_KEY</code> — lets the server read the full forwarded email body.</li>
             <li><code>BUDDY_INBOX_WEBHOOK_TOKEN</code> — secret token to stop random posts.</li>
             <li><code>BUDDY_INBOX_ALLOWED_TO</code> — the Buddy email address allowed to receive.</li>
-            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox?token=...</code>.</li>
+            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox?token=***</code>.</li>
           </ul>
         </article>
       </section>
@@ -108,9 +118,47 @@
     </main>
 
     <footer>
-      <small>Buddy Inbox is designed but not connected until Dad approves and adds the real email secrets.</small>
+      <small>Buddy Inbox is connected for selected forwarded emails. Keep secrets private.</small>
     </footer>
 
     <script src="assets/common.js"></script>
+    <script>
+      const inboxTokenInput = document.getElementById('inboxToken');
+      const processInboxButton = document.getElementById('processInbox');
+      const processStatus = document.getElementById('processStatus');
+
+      processInboxButton.addEventListener('click', async () => {
+        const token = inboxTokenInput.value.trim();
+        if (!token) {
+          processStatus.textContent = 'Paste the webhook token first.';
+          return;
+        }
+
+        processInboxButton.disabled = true;
+        processStatus.textContent = 'Adding new Buddy Inbox emails to General Notes…';
+
+        try {
+          const response = await fetch('/api/buddy-inbox-to-notes', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-buddy-inbox-token': token,
+            },
+            body: JSON.stringify({ limit: 5 }),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.ok) {
+            throw new Error(result.error || 'Could not process Buddy Inbox emails.');
+          }
+          processStatus.textContent = result.processed
+            ? `Added ${result.processed} email${result.processed === 1 ? '' : 's'} to General Notes.`
+            : 'No new Buddy Inbox emails to add.';
+        } catch (error) {
+          processStatus.textContent = error.message || 'Could not process Buddy Inbox emails.';
+        } finally {
+          processInboxButton.disabled = false;
+        }
+      });
+    </script>
   </body>
 </html>
