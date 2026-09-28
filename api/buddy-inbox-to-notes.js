@@ -7,6 +7,7 @@ const REVIEWABLE_STATUSES = ['new', 'ready', 'metadata-only', 'reviewed'];
 const UNREVIEWED_STATUSES = ['new', 'ready', 'metadata-only'];
 
 function jsonResponse(res, status, body) {
+  res.setHeader?.('Cache-Control', 'no-store');
   return res.status(status).json(body);
 }
 
