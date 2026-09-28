@@ -2,10 +2,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const BUDDY_INBOX_WEBHOOK_TOKEN = process.env.BUDDY_INBOX_WEBHOOK_TOKEN;
-const ELIGIBLE_STATUSES = ['new', 'ready', 'metadata-only'];
+const BUDDY_INBOX_ACTION_TOKEN = process.env.BUDDY_INBOX_ACTION_TOKEN;
+const REVIEWABLE_STATUSES = ['new', 'ready', 'metadata-only', 'reviewed'];
+const UNREVIEWED_STATUSES = ['new', 'ready', 'metadata-only'];
 
 function jsonResponse(res, status, body) {
+  res.setHeader?.('Cache-Control', 'no-store');
   return res.status(status).json(body);
 }
 
@@ -16,20 +18,20 @@ function headerValue(headers, name) {
 function requestToken(headers = {}) {
   const auth = headerValue(headers, 'authorization');
   if (auth.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
-  return headerValue(headers, 'x-buddy-inbox-token');
+  return headerValue(headers, 'x-buddy-inbox-action-token') || headerValue(headers, 'x-buddy-inbox-token');
 }
 
 function missingConfig() {
   const missing = [];
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) missing.push('BUDDY_INBOX_WEBHOOK_TOKEN');
+  if (!BUDDY_INBOX_ACTION_TOKEN) missing.push('BUDDY_INBOX_ACTION_TOKEN');
   return missing;
 }
 
 function isAuthorized(headers = {}) {
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) return false;
-  return requestToken(headers) === BUDDY_INBOX_WEBHOOK_TOKEN;
+  if (!BUDDY_INBOX_ACTION_TOKEN) return false;
+  return requestToken(headers) === BUDDY_INBOX_ACTION_TOKEN;
 }
 
 function stripHtml(html = '') {
@@ -50,36 +52,143 @@ function stripHtml(html = '') {
     .trim();
 }
 
-function cleanSnippet(message) {
-  const source = message.summary || message.text_body || stripHtml(message.html_body || '');
-  return String(source)
+function cleanText(value = '', maxLength = 1200) {
+  return String(value || '')
     .replace(/https?:\/\/\S+/g, '[link]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 500);
+    .slice(0, maxLength);
 }
 
-function noteBlockFromMessage(message) {
-  const receivedAt = message.received_at
-    ? new Date(message.received_at).toLocaleString('en-AU', { timeZone: 'Australia/Adelaide' })
-    : 'unknown time';
-  const snippet = cleanSnippet(message) || 'No readable preview was included.';
-
-  return [
-    `• Buddy Inbox: ${message.subject || '(no subject)'}`,
-    `• From: ${message.from_email || 'unknown sender'}`,
-    `• Received: ${receivedAt}`,
-    `• Preview: ${snippet}`,
-  ].join('\n');
+function messagePreview(message) {
+  return cleanText(message.summary || message.text_body || stripHtml(message.html_body || ''), 1200);
 }
 
-function appendNoteContent(existing = '', blocks = []) {
-  const header = '• Buddy Inbox processed emails';
-  const separator = '\n\n';
-  const body = blocks.join('\n\n');
-  const current = String(existing || '').trim();
-  const next = current ? `${current}${separator}${body}` : `${header}${separator}${body}`;
-  return next.slice(-8000);
+function safeDate(value) {
+  if (!value) return 'unknown time';
+  return new Date(value).toLocaleString('en-AU', { timeZone: 'Australia/Adelaide' });
+}
+
+function emailNoteText(message) {
+  return cleanText(message.text_body || stripHtml(message.html_body || '') || message.summary || '', 6000);
+}
+
+function buildFiledNote(messages = [], noteContent = '') {
+  const buddyOverride = cleanText(noteContent, 6000);
+  const noteBlocks = messages.map((message) => {
+    const emailText = emailNoteText(message);
+    const body = buddyOverride || emailText || '(No readable note text was included.)';
+    const sourceRef = `Source email: ${message.subject || '(no subject)'} — ${message.from_email || 'unknown sender'} — ${safeDate(message.received_at)}`;
+    return `${body}\n\n${sourceRef}`;
+  });
+
+  return noteBlocks.join('\n\n---\n\n').slice(0, 8000);
+}
+
+function idList(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .map((id) => String(id || '').trim())
+    .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
+    .slice(0, 10);
+}
+
+async function listMessages(supabase, limit) {
+  const safeLimit = Math.min(Math.max(Number(limit || 10), 1), 25);
+  const { data, error } = await supabase
+    .from('buddy_inbox_messages')
+    .select('id, subject, from_email, to_emails, received_at, summary, text_body, html_body, attachment_count, status')
+    .in('status', REVIEWABLE_STATUSES)
+    .order('received_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (error) throw error;
+
+  return (data || []).map((message) => ({
+    id: message.id,
+    subject: message.subject || '(no subject)',
+    fromEmail: message.from_email || 'unknown sender',
+    toEmails: message.to_emails || [],
+    receivedAt: message.received_at,
+    status: message.status,
+    attachmentCount: message.attachment_count || 0,
+    preview: messagePreview(message),
+  }));
+}
+
+async function createNoteFromMessages(supabase, req) {
+  const ids = idList(req.body?.messageIds || req.body?.messageId);
+  if (!ids.length) {
+    return { ok: true, processed: 0, message: 'No valid Buddy Inbox message ids were supplied.' };
+  }
+
+
+  const { data: messages, error: claimError } = await supabase
+    .from('buddy_inbox_messages')
+    .update({ status: 'processing' })
+    .in('id', ids)
+    .in('status', REVIEWABLE_STATUSES)
+    .select('id, subject, from_email, received_at, summary, text_body, html_body, status');
+
+  if (claimError) throw claimError;
+  if (!messages?.length) {
+    return { ok: true, processed: 0, message: 'No matching Buddy Inbox messages were ready for Buddy to file.' };
+  }
+
+  try {
+    const content = buildFiledNote(messages, req.body?.noteContent);
+    const { data: note, error: noteError } = await supabase
+      .from('notes')
+      .insert([{ category: req.body?.category || 'general', content, created_by: 'Buddy' }])
+      .select('id')
+      .single();
+
+    if (noteError) throw noteError;
+
+    const { error: updateError } = await supabase
+      .from('buddy_inbox_messages')
+      .update({ status: 'noted' })
+      .in('id', messages.map((message) => message.id))
+      .eq('status', 'processing');
+
+    if (updateError) throw updateError;
+
+    return {
+      ok: true,
+      processed: messages.length,
+      noteId: note?.id || null,
+      subjects: messages.map((message) => message.subject || '(no subject)'),
+      message: 'Buddy filed selected inbox message(s) into Notes.',
+    };
+  } catch (error) {
+    await supabase
+      .from('buddy_inbox_messages')
+      .update({ status: 'error' })
+      .in('id', messages.map((message) => message.id))
+      .eq('status', 'processing');
+    throw error;
+  }
+}
+
+async function updateMessageStatus(supabase, req, status, allowedStatuses = REVIEWABLE_STATUSES) {
+  const ids = idList(req.body?.messageIds || req.body?.messageId);
+  if (!ids.length) return { ok: true, processed: 0, message: 'No valid message ids were supplied.' };
+
+  const { data, error } = await supabase
+    .from('buddy_inbox_messages')
+    .update({ status })
+    .in('id', ids)
+    .in('status', allowedStatuses)
+    .select('id, subject');
+
+  if (error) throw error;
+
+  return {
+    ok: true,
+    processed: data?.length || 0,
+    subjects: (data || []).map((message) => message.subject || '(no subject)'),
+    message: `Buddy marked selected message(s) as ${status}.`,
+  };
 }
 
 export default async function handler(req, res) {
@@ -98,81 +207,27 @@ export default async function handler(req, res) {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
-  const limit = Math.min(Math.max(Number(req.body?.limit || 5), 1), 20);
-
-  const { data: candidates, error: readError } = await supabase
-    .from('buddy_inbox_messages')
-    .select('id, subject, from_email, received_at, text_body, html_body, summary, status')
-    .in('status', ELIGIBLE_STATUSES)
-    .order('received_at', { ascending: true })
-    .limit(limit);
-
-  if (readError) {
-    return jsonResponse(res, 500, { ok: false, error: 'Could not read Buddy Inbox messages' });
-  }
-
-  const claimed = [];
-  for (const candidate of candidates || []) {
-    const { data: claim, error: claimError } = await supabase
-      .from('buddy_inbox_messages')
-      .update({ status: 'processing' })
-      .eq('id', candidate.id)
-      .in('status', ELIGIBLE_STATUSES)
-      .select('id, subject, from_email, received_at, text_body, html_body, summary')
-      .single();
-
-    if (!claimError && claim) claimed.push(claim);
-  }
-
-  if (!claimed.length) {
-    return jsonResponse(res, 200, { ok: true, processed: 0, message: 'No new Buddy Inbox messages to turn into notes.' });
-  }
+  const action = req.body?.action || 'list';
 
   try {
-    const { data: latestNotes, error: latestError } = await supabase
-      .from('notes')
-      .select('content')
-      .eq('category', 'general')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (latestError) throw latestError;
-
-    const blocks = claimed.map(noteBlockFromMessage);
-    const content = appendNoteContent(latestNotes?.[0]?.content || '', blocks);
-    const { data: note, error: noteError } = await supabase
-      .from('notes')
-      .insert([{ category: 'general', content, created_by: 'Buddy Inbox' }])
-      .select('id')
-      .single();
-
-    if (noteError) throw noteError;
-
-    for (const message of claimed) {
-      await supabase
-        .from('buddy_inbox_messages')
-        .update({ status: 'noted' })
-        .eq('id', message.id)
-        .eq('status', 'processing');
+    if (action === 'list') {
+      return jsonResponse(res, 200, { ok: true, messages: await listMessages(supabase, req.body?.limit) });
     }
 
-    return jsonResponse(res, 200, {
-      ok: true,
-      processed: claimed.length,
-      noteId: note?.id || null,
-      subjects: claimed.map((message) => message.subject || '(no subject)'),
-      message: 'Buddy Inbox messages were appended to General notes.',
-    });
+    if (action === 'create_note') {
+      return jsonResponse(res, 200, await createNoteFromMessages(supabase, req));
+    }
+
+    if (action === 'archive') {
+      return jsonResponse(res, 200, await updateMessageStatus(supabase, req, 'archived', REVIEWABLE_STATUSES));
+    }
+
+    if (action === 'mark_reviewed') {
+      return jsonResponse(res, 200, await updateMessageStatus(supabase, req, 'reviewed', UNREVIEWED_STATUSES));
+    }
+
+    return jsonResponse(res, 400, { ok: false, error: 'Unknown Buddy Inbox action' });
   } catch (error) {
-    for (const message of claimed) {
-      await supabase
-        .from('buddy_inbox_messages')
-        .update({ status: 'error' })
-        .eq('id', message.id)
-        .eq('status', 'processing');
-    }
-
-    return jsonResponse(res, 500, { ok: false, error: 'Could not create CRM note from Buddy Inbox messages' });
+    return jsonResponse(res, 500, { ok: false, error: 'Could not complete Buddy Inbox action' });
   }
 }
