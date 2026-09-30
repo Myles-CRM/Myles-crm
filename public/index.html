@@ -273,6 +273,17 @@
           .filter((entry) => entry.value);
       }
 
+      function parsePhoneEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value);
+        const rawValue = String(value || '').trim();
+        if (!rawValue) return [];
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (Array.isArray(parsed)) return normaliseEntries(parsed);
+        } catch {}
+        return parseEntries(rawValue);
+      }
+
       function parseList(value = '') {
         if (Array.isArray(value)) return value.map((item) => typeof item === 'object' && item !== null ? String(item.value || '').trim() : String(item || '').trim()).filter(Boolean);
         return String(value || '')
@@ -287,7 +298,7 @@
       }
 
       function normaliseContact(contact, source) {
-        const phones = normaliseEntries(contact.phones || parseEntries(contact.phone));
+        const phones = normaliseEntries(contact.phones || parsePhoneEntries(contact.phone));
         const emails = normaliseEntries(contact.emails || parseEntries(contact.email));
         const professions = parseList(contact.professions || contact.profession);
         return {

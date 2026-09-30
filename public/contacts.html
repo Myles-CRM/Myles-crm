@@ -202,6 +202,21 @@
         return normaliseEntries(entries, defaultLabel).map((entry) => `${entry.label}|${entry.value}`).join('\n');
       }
 
+      function parsePhoneEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value, 'mobile');
+        const rawValue = String(value || '').trim();
+        if (!rawValue) return [];
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (Array.isArray(parsed)) return normaliseEntries(parsed, 'mobile');
+        } catch {}
+        return parseEntries(rawValue, 'mobile');
+      }
+
+      function serialisePhoneEntries(entries = []) {
+        return JSON.stringify(normaliseEntries(entries, 'mobile'));
+      }
+
       function parseSimpleList(value = '') {
         if (Array.isArray(value)) return normaliseSimpleList(value);
         return String(value || '')
@@ -232,7 +247,7 @@
       }
 
       function normaliseContact(contact, source) {
-        const phones = normaliseEntries(contact.phones || parseEntries(contact.phone, 'mobile'), 'mobile');
+        const phones = normaliseEntries(contact.phones || parsePhoneEntries(contact.phone), 'mobile');
         const emails = normaliseEntries(contact.emails || parseEntries(contact.email, 'home'), 'home');
         const addresses = normaliseEntries(contact.addresses || parseEntries(contact.address, 'home'), 'home');
         const professions = normaliseSimpleList(contact.professions || parseSimpleList(contact.profession));
@@ -240,7 +255,7 @@
           id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
           first_name: contact.first_name || '',
           last_name: contact.last_name || '',
-          phone: serialiseEntries(phones, 'mobile'),
+          phone: serialisePhoneEntries(phones),
           phones,
           emails,
           email: serialiseEntries(emails, 'home'),
@@ -258,7 +273,7 @@
         return {
           first_name: contact.first_name,
           last_name: contact.last_name,
-          phone: serialiseEntries(contact.phones, 'mobile'),
+          phone: serialisePhoneEntries(contact.phones),
           email: serialiseEntries(contact.emails, 'home'),
           address: serialiseEntries(contact.addresses, 'home'),
           profession: serialiseSimpleList(contact.professions),
