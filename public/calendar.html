@@ -212,6 +212,32 @@
         return new Date(year, month - 1, day);
       }
 
+      function addDays(date, days) {
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + days);
+        return nextDate;
+      }
+
+      function addMonthsClamped(date, months) {
+        const nextDate = new Date(date);
+        const originalDay = nextDate.getDate();
+        nextDate.setDate(1);
+        nextDate.setMonth(nextDate.getMonth() + months);
+        const lastDayOfTargetMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+        return nextDate;
+      }
+
+      function addYearsClamped(date, years) {
+        const nextDate = new Date(date);
+        const originalDay = nextDate.getDate();
+        nextDate.setDate(1);
+        nextDate.setFullYear(nextDate.getFullYear() + years);
+        const lastDayOfTargetMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+        return nextDate;
+      }
+
       function normaliseEvent(event, source) {
         return {
           id: event.id || `${source}-${event.title}-${event.date}-${event.time || 'all-day'}`,
@@ -703,7 +729,7 @@
       }
 
       async function deleteEvent(event) {
-        const okToDelete = confirm(`Delete ${event.title}?`);
+        const okToDelete = confirm(`Delete ${event.title}${event.repeat && event.repeat !== 'never' ? ' and its repeats' : ''}?`);
         if (!okToDelete) return;
 
         try {
@@ -721,21 +747,75 @@
         }
       }
 
+      function getNextRepeatDate(date, repeat) {
+        if (repeat === 'daily') return addDays(date, 1);
+        if (repeat === 'weekly') return addDays(date, 7);
+        if (repeat === 'monthly') return addMonthsClamped(date, 1);
+        if (repeat === 'yearly') return addYearsClamped(date, 1);
+        return null;
+      }
+
+      function shiftDateKey(dateKey, days) {
+        return toDateKey(addDays(parseDateKey(dateKey), days));
+      }
+
+      function createRepeatOccurrence(event, occurrenceDate) {
+        if (occurrenceDate === event.date) return event;
+
+        const startDate = parseDateKey(event.date);
+        const repeatDate = parseDateKey(occurrenceDate);
+        const dayOffset = Math.round((repeatDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+
+        return {
+          ...event,
+          date: occurrenceDate,
+          endDate: event.endDate ? shiftDateKey(event.endDate, dayOffset) : occurrenceDate,
+          originalDate: event.date,
+          isRepeatOccurrence: true,
+        };
+      }
+
+      function getEventOccurrencesBetween(startDateKey, endDateKey) {
+        const occurrenceLimitByRepeat = { daily: 370, weekly: 120, monthly: 72, yearly: 12 };
+
+        return events.flatMap((event) => {
+          if (!event.date) return [];
+
+          const repeat = event.repeat || 'never';
+          if (repeat === 'never') {
+            return event.date >= startDateKey && event.date <= endDateKey ? [event] : [];
+          }
+
+          const occurrences = [];
+          let occurrenceDate = parseDateKey(event.date);
+          const endDate = parseDateKey(endDateKey);
+          const limit = occurrenceLimitByRepeat[repeat] || 1;
+
+          for (let count = 0; count < limit && occurrenceDate <= endDate; count += 1) {
+            const occurrenceDateKey = toDateKey(occurrenceDate);
+            if (occurrenceDateKey >= startDateKey) {
+              occurrences.push(createRepeatOccurrence(event, occurrenceDateKey));
+            }
+
+            const nextDate = getNextRepeatDate(occurrenceDate, repeat);
+            if (!nextDate || nextDate <= occurrenceDate) break;
+            occurrenceDate = nextDate;
+          }
+
+          return occurrences;
+        });
+      }
+
       function getEventsForDay(dateKey) {
-        return events
-          .filter((event) => event.date === dateKey)
+        return getEventOccurrencesBetween(dateKey, dateKey)
           .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
       }
 
       function getVisibleMonthEvents() {
-        const month = visibleMonth.getMonth();
-        const year = visibleMonth.getFullYear();
+        const monthStart = toDateKey(visibleMonth);
+        const monthEnd = toDateKey(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0));
 
-        return events
-          .filter((event) => {
-            const date = parseDateKey(event.date);
-            return date.getMonth() === month && date.getFullYear() === year;
-          })
+        return getEventOccurrencesBetween(monthStart, monthEnd)
           .sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`));
       }
 
@@ -861,13 +941,15 @@
           editButton.className = 'delete-button edit-button';
           editButton.textContent = 'Edit';
           editButton.disabled = event.source === 'import';
-          editButton.title = event.source === 'import' ? 'Imported events cannot be edited here yet.' : 'Edit event';
+          editButton.title = event.source === 'import'
+            ? 'Imported events cannot be edited here yet.'
+            : (event.isRepeatOccurrence ? 'Edit the original repeated event.' : 'Edit event');
           editButton.addEventListener('click', () => startEditEvent(event));
 
           const deleteButton = document.createElement('button');
           deleteButton.type = 'button';
           deleteButton.className = 'delete-button';
-          deleteButton.textContent = 'Delete';
+          deleteButton.textContent = event.repeat && event.repeat !== 'never' ? 'Delete Series' : 'Delete';
           deleteButton.addEventListener('click', () => deleteEvent(event));
 
           item.append(time, eventDetails, source, editButton, deleteButton);
@@ -955,26 +1037,33 @@
 
       function startEditEvent(event) {
         if (event.source === 'import') return;
-        editingEventId = String(event.id);
-        editingEventSource = event.source;
-        eventEditorTitle.textContent = `Edit ${event.title}`;
+        const editableEvent = event.isRepeatOccurrence
+          ? events.find((savedEvent) =>
+            String(savedEvent.id) === String(event.id) &&
+            savedEvent.source === event.source &&
+            savedEvent.date === event.originalDate
+          ) || { ...event, date: event.originalDate, isRepeatOccurrence: false }
+          : event;
+        editingEventId = String(editableEvent.id);
+        editingEventSource = editableEvent.source;
+        eventEditorTitle.textContent = `Edit ${editableEvent.title}`;
         addEventButton.textContent = 'Save Changes';
         cancelEventEditButton.classList.remove('hidden');
-        eventTitle.value = event.title || '';
-        eventDate.value = event.date || selectedDate;
-        eventTime.value = event.time || '';
-        eventEndDate.value = event.endDate || event.date || selectedDate;
-        eventEndTime.value = event.endTime || '';
-        eventLocation.value = event.location || '';
-        eventAllDay.checked = Boolean(event.allDay);
+        eventTitle.value = editableEvent.title || '';
+        eventDate.value = editableEvent.date || selectedDate;
+        eventTime.value = editableEvent.time || '';
+        eventEndDate.value = editableEvent.endDate || editableEvent.date || selectedDate;
+        eventEndTime.value = editableEvent.endTime || '';
+        eventLocation.value = editableEvent.location || '';
+        eventAllDay.checked = Boolean(editableEvent.allDay);
         eventTime.disabled = eventAllDay.checked;
         eventEndTime.disabled = eventAllDay.checked;
-        eventReminder.value = event.reminder || 'none';
-        eventRepeat.value = event.repeat || 'never';
+        eventReminder.value = editableEvent.reminder || 'none';
+        eventRepeat.value = editableEvent.repeat || 'never';
         Array.from(eventContacts.options).forEach((option) => {
-          option.selected = (event.linkedContactIds || []).map(String).includes(String(option.value));
+          option.selected = (editableEvent.linkedContactIds || []).map(String).includes(String(option.value));
         });
-        selectedDate = event.date || selectedDate;
+        selectedDate = editableEvent.date || selectedDate;
         visibleMonth = startOfMonth(parseDateKey(selectedDate));
         renderCalendar();
         renderSelectedDay();
