@@ -10,7 +10,7 @@
   </head>
   <body>
     <header>
-<h1>Myles CRM</h1>
+      <h1>Myles CRM</h1>
       <nav>
         <a href="index.html" class="active">Home</a>
         <a href="notes.html">Notes</a>
@@ -19,36 +19,425 @@
         <a href="buddy-inbox.html">Buddy Inbox</a>
       </nav>
     </header>
-    <main>
-      <section class="cards">
-        <a class="card" href="notes.html">
-          <h2>Notes & Reminders</h2>
-          <p>Separate tabs for Guitar, Trumpet, Bass, Drums, Piano, and General.</p>
-        </a>
-        <a class="card" href="contacts.html">
-          <h2>Contacts</h2>
-          <p>Add and manage contacts with all your fields.</p>
-</a>
-        <a class="card" href="calendar.html">
-          <h2>Calendar</h2>
-          <p>Reads events from Supabase (Add via Buddy/API for now).</p>
-        </a>
-        <a class="card" href="buddy-inbox.html">
-          <h2>Send This to Buddy</h2>
-          <p>Forward useful emails for Buddy to summarise, organise, or turn into CRM items.</p>
-        </a>
+
+    <main class="home-dashboard-page">
+      <section class="card hero-card dashboard-hero">
+        <p class="eyebrow">Today</p>
+        <h2 id="todayTitle">Your CRM summary</h2>
+        <p id="dashboardStatus">Loading your events, contacts, and homework notes…</p>
+      </section>
+
+      <section class="dashboard-grid" aria-label="Today summary">
+        <article class="card dashboard-card">
+          <div class="dashboard-card-header">
+            <div>
+              <p class="eyebrow">Calendar</p>
+              <h2>Today’s Events</h2>
+            </div>
+            <a class="secondary-link" href="calendar.html">Open Calendar</a>
+          </div>
+          <ul id="todayEvents" class="summary-list"></ul>
+        </article>
+
+        <article class="card dashboard-card">
+          <div class="dashboard-card-header">
+            <div>
+              <p class="eyebrow">People</p>
+              <h2>Contacts</h2>
+            </div>
+            <a class="secondary-link" href="contacts.html">Open Contacts</a>
+          </div>
+          <ul id="contactSummary" class="summary-list contact-summary-list"></ul>
+        </article>
+
+        <article class="card dashboard-card dashboard-card-wide">
+          <div class="dashboard-card-header">
+            <div>
+              <p class="eyebrow">Notes</p>
+              <h2>Homework Notes</h2>
+            </div>
+            <a class="secondary-link" href="notes.html">Open Notes</a>
+          </div>
+          <div id="homeworkSummary" class="homework-summary"></div>
+        </article>
       </section>
     </main>
+
     <footer>
-      <small>Prototype — hosted on Netlify. Cloud data via Supabase.</small>
+      <small>Hosted on Vercel. Cloud data via Supabase, with saved copies on this device.</small>
     </footer>
 
     <!-- START: Supabase config (set your values) -->
     <script>
       window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';
-      window.SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYnpqZWlwcnJhdGJ5am5zYmdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxOTEwMTQsImV4cCI6MjA5MTc2NzAxNH0.cQ5Ty5c4PsFFhXlKT6smGusvzCqAGJeKMVej_aDYi6M';
+      window.SUPABASE_ANON = 'eyJhbG…Yi6M';
     </script>
     <!-- END: Supabase config -->
-<script src="assets/common.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="assets/common.js"></script>
+
+    <!-- START: Home dashboard script -->
+    <script>
+      const todayTitle = document.getElementById('todayTitle');
+      const dashboardStatus = document.getElementById('dashboardStatus');
+      const todayEvents = document.getElementById('todayEvents');
+      const contactSummary = document.getElementById('contactSummary');
+      const homeworkSummary = document.getElementById('homeworkSummary');
+
+      const localEventsKey = 'myles-crm-calendar-events';
+      const calendarFeedsKey = 'myles-crm-calendar-feeds';
+      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
+      const localContactsKey = 'myles-crm-contacts';
+      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const homeworkCacheKey = 'myles-crm-notes-cache-homework';
+      const labelledEntryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
+      const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+      function escapeText(value = '') {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function toDateKey(date) {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      }
+
+      function parseDateKey(dateKey) {
+        const [year, month, day] = String(dateKey || '').split('-').map(Number);
+        return new Date(year, month - 1, day);
+      }
+
+      function addDays(date, days) {
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + days);
+        return nextDate;
+      }
+
+      function addMonthsClamped(date, months) {
+        const nextDate = new Date(date);
+        const originalDay = nextDate.getDate();
+        nextDate.setDate(1);
+        nextDate.setMonth(nextDate.getMonth() + months);
+        const lastDayOfTargetMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+        return nextDate;
+      }
+
+      function addYearsClamped(date, years) {
+        const nextDate = new Date(date);
+        const originalDay = nextDate.getDate();
+        nextDate.setDate(1);
+        nextDate.setFullYear(nextDate.getFullYear() + years);
+        const lastDayOfTargetMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+        return nextDate;
+      }
+
+      function getDateDistanceInDays(startDate, endDate) {
+        return Math.floor((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+      }
+
+      function getDateDistanceInMonths(startDate, endDate) {
+        return (endDate.getFullYear() - startDate.getFullYear()) * 12 + endDate.getMonth() - startDate.getMonth();
+      }
+
+      function getRepeatDateFromStart(startDate, repeat, count) {
+        if (repeat === 'daily') return addDays(startDate, count);
+        if (repeat === 'weekly') return addDays(startDate, count * 7);
+        if (repeat === 'monthly') return addMonthsClamped(startDate, count);
+        if (repeat === 'yearly') return addYearsClamped(startDate, count);
+        return null;
+      }
+
+      function getFirstRepeatCountInRange(startDate, rangeStartDate, repeat) {
+        if (rangeStartDate <= startDate) return 0;
+        if (repeat === 'daily') return Math.max(0, getDateDistanceInDays(startDate, rangeStartDate));
+        if (repeat === 'weekly') return Math.max(0, Math.floor(getDateDistanceInDays(startDate, rangeStartDate) / 7));
+        if (repeat === 'monthly') return Math.max(0, getDateDistanceInMonths(startDate, rangeStartDate));
+        if (repeat === 'yearly') return Math.max(0, rangeStartDate.getFullYear() - startDate.getFullYear());
+        return 0;
+      }
+
+      function normaliseEvent(event, source) {
+        return {
+          id: event.id || `${source}-${event.title}-${event.date}-${event.time || 'all-day'}`,
+          title: event.title || 'Untitled event',
+          date: event.date || event.startDate,
+          time: event.time || event.startTime || '',
+          endDate: event.endDate || event.date || event.startDate,
+          endTime: event.endTime || '',
+          allDay: Boolean(event.allDay),
+          location: event.location || '',
+          reminder: event.reminder || 'none',
+          repeat: event.repeat || 'never',
+          cloudEventId: event.cloudEventId ? String(event.cloudEventId) : '',
+          isCloudMeta: Boolean(event.isCloudMeta),
+          source,
+          sourceName: event.sourceName || '',
+          hidden: Boolean(event.hidden),
+        };
+      }
+
+      function getEventOccurrencesForDay(events, dateKey) {
+        const rangeStartDate = parseDateKey(dateKey);
+        return events.flatMap((event) => {
+          if (!event.date) return [];
+          const repeat = event.repeat || 'never';
+          if (repeat === 'never') return event.date === dateKey ? [event] : [];
+
+          const startDate = parseDateKey(event.date);
+          let count = getFirstRepeatCountInRange(startDate, rangeStartDate, repeat);
+          let occurrenceDate = getRepeatDateFromStart(startDate, repeat, count);
+          while (occurrenceDate && occurrenceDate < rangeStartDate) {
+            count += 1;
+            occurrenceDate = getRepeatDateFromStart(startDate, repeat, count);
+          }
+          return occurrenceDate && toDateKey(occurrenceDate) === dateKey ? [{ ...event, date: dateKey }] : [];
+        }).sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+      }
+
+      function readJson(key, fallback = []) {
+        try {
+          return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+        } catch (error) {
+          console.warn(`Could not read ${key}`, error);
+          return fallback;
+        }
+      }
+
+      function loadLocalEvents() {
+        return readJson(localEventsKey).map((event) => normaliseEvent(event, 'local'));
+      }
+
+      function loadImportedEvents() {
+        return readJson(calendarFeedsKey).flatMap((feed) =>
+          (feed.events || [])
+            .filter((event) => !event.hidden)
+            .map((event) => normaliseEvent({ ...event, sourceName: feed.name }, 'import'))
+        );
+      }
+
+      function loadCachedCloudEvents() {
+        return readJson(cloudEventsCacheKey).map((event) => normaliseEvent(event, 'cloud'));
+      }
+
+      async function loadCloudEvents() {
+        if (!window.supabase) return loadCachedCloudEvents();
+        const { data, error } = await window.supabase
+          .from('events')
+          .select('*')
+          .is('deleted_at', null)
+          .order('date', { ascending: true })
+          .order('time', { ascending: true });
+        if (error) {
+          console.warn('Could not load cloud calendar events', error);
+          return loadCachedCloudEvents();
+        }
+        const cloudEvents = (data || []).filter((event) => event.date).map((event) => normaliseEvent(event, 'cloud'));
+        localStorage.setItem(cloudEventsCacheKey, JSON.stringify(cloudEvents));
+        return cloudEvents;
+      }
+
+      function parseEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value);
+        return String(value || '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            if (line.includes('|')) {
+              const [label, ...rest] = line.split('|');
+              return { label: label.trim().toLowerCase() || 'home', value: rest.join('|').trim() };
+            }
+            if (line.includes(':')) {
+              const [label, ...rest] = line.split(':');
+              const cleanLabel = label.trim().toLowerCase();
+              if (labelledEntryLabels.includes(cleanLabel)) return { label: cleanLabel, value: rest.join(':').trim() };
+            }
+            return { label: 'mobile', value: line };
+          })
+          .filter((entry) => entry.value);
+      }
+
+      function normaliseEntries(entries = []) {
+        return entries
+          .map((entry) => ({
+            label: labelledEntryLabels.includes(String(entry.label || '').toLowerCase()) ? String(entry.label).toLowerCase() : 'other',
+            value: String(entry.value || '').trim(),
+          }))
+          .filter((entry) => entry.value);
+      }
+
+      function parsePhoneEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value);
+        const rawValue = String(value || '').trim();
+        if (!rawValue) return [];
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (Array.isArray(parsed)) return normaliseEntries(parsed);
+        } catch {}
+        return parseEntries(rawValue);
+      }
+
+      function parseList(value = '') {
+        if (Array.isArray(value)) return value.map((item) => typeof item === 'object' && item !== null ? String(item.value || '').trim() : String(item || '').trim()).filter(Boolean);
+        return String(value || '')
+          .split('\n')
+          .flatMap((line) => line.split(','))
+          .map((item) => item.replace(/^(home|work|school|mobile|company|other)[:|]/i, '').trim())
+          .filter(Boolean);
+      }
+
+      function fullName(contact) {
+        return `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Unnamed contact';
+      }
+
+      function normaliseContact(contact, source) {
+        const phones = normaliseEntries(contact.phones || parsePhoneEntries(contact.phone));
+        const emails = normaliseEntries(contact.emails || parseEntries(contact.email));
+        const professions = parseList(contact.professions || contact.profession);
+        return {
+          id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          first_name: contact.first_name || '',
+          last_name: contact.last_name || '',
+          phone: phones[0]?.value || contact.phone || '',
+          phones,
+          emails,
+          professions,
+          notes: contact.notes || '',
+          source,
+        };
+      }
+
+      function loadLocalContacts() {
+        return readJson(localContactsKey).map((contact) => normaliseContact(contact, 'local'));
+      }
+
+      function loadCachedCloudContacts() {
+        return readJson(cloudContactsCacheKey).map((contact) => normaliseContact(contact, 'cloud'));
+      }
+
+      async function loadCloudContacts() {
+        if (!window.supabase) return loadCachedCloudContacts();
+        const { data, error } = await window.supabase
+          .from('contacts')
+          .select('*')
+          .is('deleted_at', null)
+          .order('first_name', { ascending: true })
+          .order('last_name', { ascending: true });
+        if (error) {
+          console.warn('Could not load cloud contacts', error);
+          return loadCachedCloudContacts();
+        }
+        const contacts = (data || []).map((contact) => normaliseContact(contact, 'cloud'));
+        localStorage.setItem(cloudContactsCacheKey, JSON.stringify(contacts));
+        return contacts;
+      }
+
+      async function loadHomeworkNotes() {
+        if (!window.supabase) return localStorage.getItem(homeworkCacheKey) || '';
+        const { data, error } = await window.supabase
+          .from('notes')
+          .select('*')
+          .eq('category', 'homework')
+          .is('deleted_at', null)
+          .order('created_at', { ascending: true });
+        if (error) {
+          console.warn('Could not load homework notes', error);
+          return localStorage.getItem(homeworkCacheKey) || '';
+        }
+        const latest = data.length ? data[data.length - 1].content : '';
+        localStorage.setItem(homeworkCacheKey, latest);
+        return latest;
+      }
+
+      function renderEmpty(container, message) {
+        container.innerHTML = `<li class="empty-state">${escapeText(message)}</li>`;
+      }
+
+      function renderEvents(events) {
+        if (!events.length) {
+          renderEmpty(todayEvents, 'No events today. Nice clear runway.');
+          return;
+        }
+        todayEvents.innerHTML = events.map((event) => `
+          <li class="summary-item">
+            <span class="summary-time">${escapeText(event.allDay ? 'All day' : (event.time || 'Any time'))}</span>
+            <span class="summary-main"><strong>${escapeText(event.title)}</strong>${event.location ? `<small>📍 ${escapeText(event.location)}</small>` : ''}</span>
+          </li>
+        `).join('');
+      }
+
+      function renderContacts(contacts) {
+        if (!contacts.length) {
+          renderEmpty(contactSummary, 'No contacts yet. Add some from Contacts.');
+          return;
+        }
+        contactSummary.innerHTML = contacts
+          .slice()
+          .sort((a, b) => fullName(a).localeCompare(fullName(b)))
+          .slice(0, 8)
+          .map((contact) => {
+            const detail = contact.professions.join(', ') || contact.phones[0]?.value || contact.emails[0]?.value || 'No details yet';
+            return `
+              <li class="summary-item contact-summary-item">
+                <span class="contact-avatar small">${escapeText((contact.first_name[0] || '') + (contact.last_name[0] || '') || '?')}</span>
+                <span class="summary-main"><strong>${escapeText(fullName(contact))}</strong><small>${escapeText(detail)}</small></span>
+              </li>
+            `;
+          }).join('');
+      }
+
+      function renderHomework(content) {
+        const lines = String(content || '')
+          .split('\n')
+          .map((line) => line.replace(/^(•|-|\*)\s*/, '').trim())
+          .filter(Boolean)
+          .slice(0, 8);
+        if (!lines.length) {
+          homeworkSummary.innerHTML = '<p class="empty-state">No homework notes yet. Add them in Notes → Homework.</p>';
+          return;
+        }
+        homeworkSummary.innerHTML = `<ul class="summary-list homework-list">${lines.map((line) => `<li>${escapeText(line)}</li>`).join('')}</ul>`;
+      }
+
+      async function loadDashboard() {
+        const today = new Date();
+        const todayKey = toDateKey(today);
+        todayTitle.textContent = dateFormatter.format(today);
+        try {
+          const [cloudEvents, contacts, homework] = await Promise.all([
+            loadCloudEvents(),
+            loadCloudContacts(),
+            loadHomeworkNotes(),
+          ]);
+          const localEvents = loadLocalEvents();
+          const localMetaByCloudId = new Map(
+            localEvents.filter((event) => event.isCloudMeta && event.cloudEventId).map((event) => [event.cloudEventId, event])
+          );
+          const mergedCloudEvents = cloudEvents.map((event) => {
+            const meta = localMetaByCloudId.get(String(event.id));
+            return meta ? { ...event, ...meta, id: event.id, source: 'cloud' } : event;
+          });
+          const visibleLocalEvents = localEvents.filter((event) => !event.isCloudMeta);
+          const allEvents = [...mergedCloudEvents, ...visibleLocalEvents, ...loadImportedEvents()];
+          renderEvents(getEventOccurrencesForDay(allEvents, todayKey));
+          renderContacts([...contacts, ...loadLocalContacts()]);
+          renderHomework(homework);
+          dashboardStatus.textContent = 'Here’s the quick view for today.';
+        } catch (error) {
+          console.warn('Could not load dashboard', error);
+          dashboardStatus.textContent = 'Could not load everything yet. Try refreshing or open each tab directly.';
+        }
+      }
+
+      loadDashboard();
+    </script>
+    <!-- END: Home dashboard script -->
   </body>
 </html>

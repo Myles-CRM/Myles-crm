@@ -55,7 +55,16 @@
             <input name="first_name" placeholder="First name" autocomplete="given-name" required />
             <input name="last_name" placeholder="Last name" autocomplete="family-name" required />
           </div>
-          <input name="phone" type="tel" placeholder="Phone" autocomplete="tel" />
+          <div class="multi-entry-card" data-entry-type="phones">
+            <div class="multi-entry-header">
+              <div>
+                <p class="eyebrow">Phone numbers</p>
+                <h3>Home, work, mobile, or other</h3>
+              </div>
+              <button type="button" class="secondary-button" data-action="add-phone">+ Add</button>
+            </div>
+            <div id="phoneFields" class="multi-entry-list"></div>
+          </div>
 
           <div class="multi-entry-card" data-entry-type="professions">
             <div class="multi-entry-header">
@@ -127,13 +136,14 @@
       const contactEditorEyebrow = document.getElementById('contactEditorEyebrow');
       const contactEditorTitle = document.getElementById('contactEditorTitle');
       const cancelContactEditButton = document.getElementById('cancelContactEdit');
+      const phoneFields = document.getElementById('phoneFields');
       const professionFields = document.getElementById('professionFields');
       const emailFields = document.getElementById('emailFields');
       const addressFields = document.getElementById('addressFields');
 
       const localContactsKey = 'myles-crm-contacts';
       const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
-      const entryLabels = ['home', 'work', 'school', 'other'];
+      const entryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
       let contacts = [];
       let selectedContactId = '';
       let editingContactId = '';
@@ -158,8 +168,8 @@
         return `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Unnamed contact';
       }
 
-      function parseEntries(value = '') {
-        if (Array.isArray(value)) return normaliseEntries(value);
+      function parseEntries(value = '', defaultLabel = 'home') {
+        if (Array.isArray(value)) return normaliseEntries(value, defaultLabel);
         return String(value || '')
           .split('\n')
           .map((line) => line.trim())
@@ -167,29 +177,61 @@
           .map((line) => {
             if (line.includes('|')) {
               const [label, ...rest] = line.split('|');
-              return { label: label.trim().toLowerCase() || 'home', value: rest.join('|').trim() };
+              return { label: label.trim().toLowerCase() || defaultLabel, value: rest.join('|').trim() };
             }
             if (line.includes(':')) {
               const [label, ...rest] = line.split(':');
               const cleanLabel = label.trim().toLowerCase();
               if (entryLabels.includes(cleanLabel)) return { label: cleanLabel, value: rest.join(':').trim() };
             }
-            return { label: 'home', value: line };
+            return { label: defaultLabel, value: line };
           })
           .filter((entry) => entry.value);
       }
 
-      function normaliseEntries(entries = []) {
+      function normaliseEntries(entries = [], defaultLabel = 'home') {
         return entries
           .map((entry) => ({
-            label: entryLabels.includes(String(entry.label || '').toLowerCase()) ? String(entry.label).toLowerCase() : 'home',
+            label: entryLabels.includes(String(entry.label || '').toLowerCase()) ? String(entry.label).toLowerCase() : defaultLabel,
             value: String(entry.value || '').trim(),
           }))
           .filter((entry) => entry.value);
       }
 
-      function serialiseEntries(entries = []) {
-        return normaliseEntries(entries).map((entry) => `${entry.label}|${entry.value}`).join('\n');
+      function serialiseEntries(entries = [], defaultLabel = 'home') {
+        return normaliseEntries(entries, defaultLabel).map((entry) => `${entry.label}|${entry.value}`).join('\n');
+      }
+
+      function parsePhoneEntries(value = '') {
+        if (Array.isArray(value)) return normaliseEntries(value, 'mobile');
+        const rawValue = String(value || '').trim();
+        if (!rawValue) return [];
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (Array.isArray(parsed)) return normaliseEntries(parsed, 'mobile');
+        } catch {}
+        return parseEntries(rawValue, 'mobile');
+      }
+
+      function serialisePhoneEntries(entries = []) {
+        return JSON.stringify(normaliseEntries(entries, 'mobile'));
+      }
+
+      function parseSimpleList(value = '') {
+        if (Array.isArray(value)) return normaliseSimpleList(value);
+        return String(value || '')
+          .split('\n')
+          .flatMap((line) => line.split(','))
+          .map((item) => item.replace(/^(home|work|school|mobile|company|other)[:|]/i, '').trim())
+          .filter(Boolean);
+      }
+
+      function normaliseSimpleList(items = []) {
+        return items.map((item) => typeof item === 'object' && item !== null ? String(item.value || '').trim() : String(item || '').trim()).filter(Boolean);
+      }
+
+      function serialiseSimpleList(items = []) {
+        return normaliseSimpleList(items).join('\n');
       }
 
       function entryValue(entries = []) {
@@ -200,21 +242,27 @@
         return normaliseEntries(entries).map((entry) => `${entry.label}: ${entry.value}`).join(' • ');
       }
 
+      function listSummary(items = []) {
+        return normaliseSimpleList(items).join(' • ');
+      }
+
       function normaliseContact(contact, source) {
-        const emails = normaliseEntries(contact.emails || parseEntries(contact.email));
-        const addresses = normaliseEntries(contact.addresses || parseEntries(contact.address));
-        const professions = normaliseEntries(contact.professions || parseEntries(contact.profession));
+        const phones = normaliseEntries(contact.phones || parsePhoneEntries(contact.phone), 'mobile');
+        const emails = normaliseEntries(contact.emails || parseEntries(contact.email, 'home'), 'home');
+        const addresses = normaliseEntries(contact.addresses || parseEntries(contact.address, 'home'), 'home');
+        const professions = normaliseSimpleList(contact.professions || parseSimpleList(contact.profession));
         return {
           id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
           first_name: contact.first_name || '',
           last_name: contact.last_name || '',
-          phone: contact.phone || '',
+          phone: serialisePhoneEntries(phones),
+          phones,
           emails,
-          email: serialiseEntries(emails),
+          email: serialiseEntries(emails, 'home'),
           addresses,
-          address: serialiseEntries(addresses),
+          address: serialiseEntries(addresses, 'home'),
           professions,
-          profession: serialiseEntries(professions),
+          profession: serialiseSimpleList(professions),
           notes: contact.notes || '',
           source,
           created_at: contact.created_at || new Date().toISOString(),
@@ -225,10 +273,10 @@
         return {
           first_name: contact.first_name,
           last_name: contact.last_name,
-          phone: contact.phone,
-          email: serialiseEntries(contact.emails),
-          address: serialiseEntries(contact.addresses),
-          profession: serialiseEntries(contact.professions),
+          phone: serialisePhoneEntries(contact.phones),
+          email: serialiseEntries(contact.emails, 'home'),
+          address: serialiseEntries(contact.addresses, 'home'),
+          profession: serialiseSimpleList(contact.professions),
           notes: contact.notes,
         };
       }
@@ -353,7 +401,7 @@
       function contactSearchText(contact) {
         return [
           fullName(contact), contact.phone, contact.notes,
-          entrySummary(contact.emails), entrySummary(contact.addresses), entrySummary(contact.professions),
+          entrySummary(contact.phones), entrySummary(contact.emails), entrySummary(contact.addresses), listSummary(contact.professions),
         ].join(' ').toLowerCase();
       }
 
@@ -383,7 +431,7 @@
         visibleContacts.forEach((contact) => {
           const item = document.createElement('li');
           const button = document.createElement('button');
-          const subtitle = entryValue(contact.professions) || entryValue(contact.emails) || contact.phone || 'No details yet';
+          const subtitle = listSummary(contact.professions) || entryValue(contact.phones) || entryValue(contact.emails) || 'No details yet';
           button.type = 'button';
           button.className = 'contact-row';
           if (contact.id === selectedContactId) button.classList.add('active');
@@ -433,25 +481,26 @@
           return;
         }
 
+        const primaryPhone = entryValue(contact.phones);
         const primaryEmail = entryValue(contact.emails);
         const primaryAddress = entryValue(contact.addresses);
         contactDetail.className = 'contact-detail';
         contactDetail.innerHTML = `
           <div class="contact-avatar large">${escapeText(initialsFor(contact))}</div>
           <h2>${escapeText(fullName(contact))}</h2>
-          <p class="contact-subtitle">${escapeText(entrySummary(contact.professions) || (contact.source === 'cloud' ? 'Cloud contact' : 'Saved on this device'))}</p>
+          <p class="contact-subtitle">${escapeText(listSummary(contact.professions) || (contact.source === 'cloud' ? 'Cloud contact' : 'Saved on this device'))}</p>
           <div class="contact-action-row">
-            ${contact.phone ? `<a class="contact-action" href="tel:${escapeText(contact.phone)}">Call</a>` : ''}
+            ${primaryPhone ? `<a class="contact-action" href="tel:${escapeText(primaryPhone)}">Call</a>` : ''}
             ${primaryEmail ? `<a class="contact-action" href="mailto:${escapeText(primaryEmail)}">Email</a>` : ''}
             ${primaryAddress ? `<a class="contact-action" href="https://maps.apple.com/?q=${encodeURIComponent(primaryAddress)}">Map</a>` : ''}
             <button class="contact-action" type="button" data-action="edit-contact">Edit</button>
             <button class="contact-action danger-action" type="button" data-action="delete-contact">Delete</button>
           </div>
           <div class="contact-detail-card">
-            ${detailLine('mobile', contact.phone, contact.phone ? `tel:${contact.phone}` : '')}
+            ${detailEntries('phone', contact.phones, (value) => `tel:${value}`)}
             ${detailEntries('email', contact.emails, (value) => `mailto:${value}`)}
             ${detailEntries('address', contact.addresses)}
-            ${detailEntries('role', contact.professions)}
+            ${normaliseSimpleList(contact.professions).map((profession) => detailLine('role', profession)).join('')}
             ${detailLine('notes', contact.notes)}
           </div>
         `;
@@ -510,11 +559,46 @@
           .filter((entry) => entry.value.trim());
       }
 
+      function createSimpleEntryRow(container, placeholder, value = '') {
+        const row = document.createElement('div');
+        row.className = 'multi-entry-row simple-entry-row';
+
+        const input = document.createElement('input');
+        input.className = 'entry-value';
+        input.placeholder = placeholder;
+        input.value = value || '';
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'secondary-button remove-entry-button';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => {
+          row.remove();
+          if (!container.querySelector('.multi-entry-row')) createSimpleEntryRow(container, placeholder);
+        });
+
+        row.append(input, removeButton);
+        container.appendChild(row);
+      }
+
+      function setSimpleEntryRows(container, placeholder, entries = []) {
+        container.innerHTML = '';
+        const cleanEntries = normaliseSimpleList(entries);
+        (cleanEntries.length ? cleanEntries : ['']).forEach((entry) => createSimpleEntryRow(container, placeholder, entry));
+      }
+
+      function getSimpleEntryRows(container) {
+        return Array.from(container.querySelectorAll('.multi-entry-row .entry-value'))
+          .map((input) => input.value.trim())
+          .filter(Boolean);
+      }
+
       function resetContactEditor() {
         editingContactId = '';
         editingContactSource = '';
         contactForm.reset();
-        setEntryRows(professionFields, 'Profession / role');
+        setEntryRows(phoneFields, 'Phone number', [{ label: 'mobile' }]);
+        setSimpleEntryRows(professionFields, 'Profession / role');
         setEntryRows(emailFields, 'Email address');
         setEntryRows(addressFields, 'Address');
         contactEditorEyebrow.textContent = 'New contact';
@@ -528,9 +612,9 @@
         editingContactSource = contact.source;
         contactForm.elements.first_name.value = contact.first_name || '';
         contactForm.elements.last_name.value = contact.last_name || '';
-        contactForm.elements.phone.value = contact.phone || '';
         contactForm.elements.notes.value = contact.notes || '';
-        setEntryRows(professionFields, 'Profession / role', contact.professions);
+        setEntryRows(phoneFields, 'Phone number', contact.phones);
+        setSimpleEntryRows(professionFields, 'Profession / role', contact.professions);
         setEntryRows(emailFields, 'Email address', contact.emails);
         setEntryRows(addressFields, 'Address', contact.addresses);
         contactEditorEyebrow.textContent = 'Edit contact';
@@ -547,10 +631,10 @@
           id,
           first_name: String(formData.get('first_name') || '').trim(),
           last_name: String(formData.get('last_name') || '').trim(),
-          phone: String(formData.get('phone') || '').trim(),
+          phones: getEntryRows(phoneFields),
           emails: getEntryRows(emailFields),
           addresses: getEntryRows(addressFields),
-          professions: getEntryRows(professionFields),
+          professions: getSimpleEntryRows(professionFields),
           notes: String(formData.get('notes') || '').trim(),
         }, source);
       }
@@ -626,7 +710,8 @@
       });
 
       contactForm.addEventListener('click', (event) => {
-        if (event.target.closest('[data-action="add-profession"]')) createEntryRow(professionFields, 'Profession / role');
+        if (event.target.closest('[data-action="add-phone"]')) createEntryRow(phoneFields, 'Phone number', { label: 'mobile' });
+        if (event.target.closest('[data-action="add-profession"]')) createSimpleEntryRow(professionFields, 'Profession / role');
         if (event.target.closest('[data-action="add-email"]')) createEntryRow(emailFields, 'Email address');
         if (event.target.closest('[data-action="add-address"]')) createEntryRow(addressFields, 'Address');
       });
