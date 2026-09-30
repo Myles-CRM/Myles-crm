@@ -747,12 +747,29 @@
         }
       }
 
-      function getNextRepeatDate(date, repeat) {
-        if (repeat === 'daily') return addDays(date, 1);
-        if (repeat === 'weekly') return addDays(date, 7);
-        if (repeat === 'monthly') return addMonthsClamped(date, 1);
-        if (repeat === 'yearly') return addYearsClamped(date, 1);
+      function getDateDistanceInDays(startDate, endDate) {
+        return Math.floor((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+      }
+
+      function getDateDistanceInMonths(startDate, endDate) {
+        return (endDate.getFullYear() - startDate.getFullYear()) * 12 + endDate.getMonth() - startDate.getMonth();
+      }
+
+      function getRepeatDateFromStart(startDate, repeat, count) {
+        if (repeat === 'daily') return addDays(startDate, count);
+        if (repeat === 'weekly') return addDays(startDate, count * 7);
+        if (repeat === 'monthly') return addMonthsClamped(startDate, count);
+        if (repeat === 'yearly') return addYearsClamped(startDate, count);
         return null;
+      }
+
+      function getFirstRepeatCountInRange(startDate, rangeStartDate, repeat) {
+        if (rangeStartDate <= startDate) return 0;
+        if (repeat === 'daily') return Math.max(0, getDateDistanceInDays(startDate, rangeStartDate));
+        if (repeat === 'weekly') return Math.max(0, Math.floor(getDateDistanceInDays(startDate, rangeStartDate) / 7));
+        if (repeat === 'monthly') return Math.max(0, getDateDistanceInMonths(startDate, rangeStartDate));
+        if (repeat === 'yearly') return Math.max(0, rangeStartDate.getFullYear() - startDate.getFullYear());
+        return 0;
       }
 
       function shiftDateKey(dateKey, days) {
@@ -776,8 +793,6 @@
       }
 
       function getEventOccurrencesBetween(startDateKey, endDateKey) {
-        const occurrenceLimitByRepeat = { daily: 370, weekly: 120, monthly: 72, yearly: 12 };
-
         return events.flatMap((event) => {
           if (!event.date) return [];
 
@@ -787,17 +802,21 @@
           }
 
           const occurrences = [];
-          let occurrenceDate = parseDateKey(event.date);
-          const endDate = parseDateKey(endDateKey);
-          const limit = occurrenceLimitByRepeat[repeat] || 1;
+          const startDate = parseDateKey(event.date);
+          const rangeStartDate = parseDateKey(startDateKey);
+          const rangeEndDate = parseDateKey(endDateKey);
+          let count = getFirstRepeatCountInRange(startDate, rangeStartDate, repeat);
+          let occurrenceDate = getRepeatDateFromStart(startDate, repeat, count);
 
-          for (let count = 0; count < limit && occurrenceDate <= endDate; count += 1) {
-            const occurrenceDateKey = toDateKey(occurrenceDate);
-            if (occurrenceDateKey >= startDateKey) {
-              occurrences.push(createRepeatOccurrence(event, occurrenceDateKey));
-            }
+          while (occurrenceDate && occurrenceDate < rangeStartDate) {
+            count += 1;
+            occurrenceDate = getRepeatDateFromStart(startDate, repeat, count);
+          }
 
-            const nextDate = getNextRepeatDate(occurrenceDate, repeat);
+          while (occurrenceDate && occurrenceDate <= rangeEndDate) {
+            occurrences.push(createRepeatOccurrence(event, toDateKey(occurrenceDate)));
+            count += 1;
+            const nextDate = getRepeatDateFromStart(startDate, repeat, count);
             if (!nextDate || nextDate <= occurrenceDate) break;
             occurrenceDate = nextDate;
           }
