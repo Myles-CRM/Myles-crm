@@ -218,3 +218,30 @@ footer { padding:16px; color:var(--muted); text-align:center; }
 .code-list code { background:#0b0f14; border:1px solid var(--border); border-radius:6px; padding:2px 6px; color:#bdeeff; }
 .signature-card { background:#0b0f14; border:1px solid var(--border); border-radius:18px; padding:16px; }
 .signature-card blockquote { margin:12px 0 0 0; padding:14px; border-left:4px solid var(--accent); background:rgba(90, 200, 250, 0.08); color:var(--fg); }
+
+
+/* Home dashboard summary */
+.home-dashboard-page { max-width:1180px; }
+.dashboard-hero { margin-bottom:16px; }
+.dashboard-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+.dashboard-card { min-height:260px; }
+.dashboard-card-wide { grid-column:1 / -1; }
+.dashboard-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.dashboard-card-header h2 { margin:0; font-size:26px; letter-spacing:-0.03em; }
+.secondary-link { color:var(--accent); text-decoration:none; font-weight:800; font-size:13px; white-space:nowrap; }
+.summary-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.summary-item { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:14px; background:#0b0f14; }
+.summary-time { flex:0 0 auto; min-width:72px; color:var(--accent); font-weight:900; font-size:13px; }
+.summary-main { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.summary-main strong, .summary-main small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.summary-main small { color:var(--muted); font-size:12px; }
+.contact-avatar.small { width:34px; height:34px; font-size:13px; }
+.homework-summary .summary-list { list-style:disc; padding-left:22px; display:block; }
+.homework-summary li { margin:8px 0; }
+.simple-entry-row { grid-template-columns:minmax(0, 1fr) auto; }
+
+@media (max-width: 760px) {
+  .dashboard-grid { grid-template-columns:1fr; }
+  .dashboard-card-wide { grid-column:auto; }
+  .dashboard-card-header { flex-direction:column; }
+}
