@@ -248,6 +248,7 @@
           reminder: event.reminder || 'none',
           reminderEnabled: event.reminderEnabled !== undefined ? Boolean(event.reminderEnabled) : Boolean(event.reminder && event.reminder !== 'none'),
           reminderMinutes: Number.isFinite(Number(event.reminderMinutes)) ? Number(event.reminderMinutes) : parseLegacyReminderMinutes(event.reminder),
+          reminderVersion: event.reminderVersion ? String(event.reminderVersion) : '',
           reminderEmail: event.reminderEmail || '',
           repeat: event.repeat || 'never',
           cloudEventId: event.cloudEventId ? String(event.cloudEventId) : '',
@@ -669,35 +670,29 @@
       }
 
       async function saveCloudReminder(event, cloudEvent) {
-        if (!window.supabase || !event.reminderEnabled) return { saved: false, skipped: true };
+        if (!window.supabase || !cloudEvent?.id) return { saved: false, skipped: true };
 
-        const dueAt = getReminderDueAt(event);
-        if (!dueAt) throw new Error('Could not calculate reminder time.');
-
-        const { error } = await window.supabase
-          .from('event_reminders')
-          .insert([{
-            event_id: String(cloudEvent.id),
-            event_title: event.title,
-            event_date: event.date,
-            event_time: event.time || null,
-            event_location: event.location || null,
-            reminder: String(event.reminderMinutes) + ' minutes before',
-            reminder_minutes: event.reminderMinutes,
-            due_at: dueAt,
-            email: event.reminderEmail || reminderEmailAddress,
-          }]);
+        const { data, error } = await window.supabase.rpc('replace_event_reminder', {
+          p_event_id: String(cloudEvent.id),
+          p_event_version: String(event.reminderVersion || Date.now()),
+          p_event_title: event.title,
+          p_event_date: event.date,
+          p_event_time: event.time || null,
+          p_event_timezone: 'Australia/Adelaide',
+          p_event_location: event.location || null,
+          p_minutes: Number(event.reminderMinutes),
+          p_email: event.reminderEmail || reminderEmailAddress,
+          p_enabled: Boolean(event.reminderEnabled),
+        });
 
         if (error) throw error;
-        return { saved: true, dueAt };
+        return { saved: Boolean(data), skipped: !data };
       }
 
       async function deleteCloudReminders(event) {
-        if (!window.supabase) return;
-        await window.supabase
-          .from('event_reminders')
-          .delete()
-          .eq('event_id', String(event.id));
+        if (!window.supabase || !event?.id) return;
+        const { error } = await window.supabase.rpc('cancel_event_reminders', { p_event_id: String(event.id) });
+        if (error) throw error;
       }
 
       function getSourceLabel(event) {
@@ -1033,6 +1028,7 @@
           reminderEnabled: eventReminderEnabled.checked,
           reminderMinutes: Math.max(0, Math.min(10080, Number(eventReminderMinutes.value) || 0)),
           reminderEmail: eventReminderEnabled.checked ? reminderEmailAddress : '',
+          reminderVersion: String(Date.now()),
           repeat: eventRepeat.value,
           linkedContactIds: Array.from(eventContacts.selectedOptions).map((option) => option.value),
         };
@@ -1103,7 +1099,6 @@
 
         if (editingEventSource === 'cloud') {
           const cloudEvent = await updateCloudEvent(editingEventId, eventDraft);
-          await deleteCloudReminders(originalEvent);
           let reminderResult = { saved: false, skipped: true };
           try {
             reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
