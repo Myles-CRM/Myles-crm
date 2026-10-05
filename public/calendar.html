@@ -659,7 +659,7 @@
       function getReminderDueAt(event) {
         if (!event.reminderEnabled) return '';
 
-        const eventTime = event.time || '09:00';
+        const eventTime = event.time || '06:30';
         const eventDateTime = new Date(`${event.date}T${eventTime}`);
         if (Number.isNaN(eventDateTime.getTime())) return '';
 

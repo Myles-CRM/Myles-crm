@@ -39,7 +39,7 @@ alter table public.event_reminders add column if not exists idempotency_key text
 update public.event_reminders
 set event_version = coalesce(event_version, id::text),
     event_timezone = coalesce(event_timezone, 'Australia/Adelaide'),
-    event_at = coalesce(event_at, (event_date::text || ' ' || coalesce(nullif(event_time, ''), '09:00'))::timestamp at time zone coalesce(event_timezone, 'Australia/Adelaide')),
+    event_at = coalesce(event_at, (event_date::text || ' ' || coalesce(nullif(event_time, ''), '06:30'))::timestamp at time zone coalesce(event_timezone, 'Australia/Adelaide')),
     reminder_minutes = coalesce(reminder_minutes, 15),
     attempt_count = coalesce(attempt_count, 0),
     idempotency_key = coalesce(idempotency_key, id::text),
@@ -91,8 +91,8 @@ begin
   if p_minutes is null or p_minutes < 0 or p_minutes > 10080 then raise exception 'Reminder minutes must be between 0 and 10080'; end if;
   if p_event_timezone <> 'Australia/Adelaide' then raise exception 'Unsupported event timezone'; end if;
 
-  -- All-day events use a 09:00 Adelaide wall-clock anchor. Timed events use their local wall-clock time.
-  v_event_at := (p_event_date::text || ' ' || coalesce(nullif(p_event_time, ''), '09:00'))::timestamp at time zone p_event_timezone;
+  -- All-day events use a 06:30 Adelaide wall-clock anchor. Timed events use their local wall-clock time.
+  v_event_at := (p_event_date::text || ' ' || coalesce(nullif(p_event_time, ''), '06:30'))::timestamp at time zone p_event_timezone;
   v_due_at := v_event_at - make_interval(mins => p_minutes);
 
   update public.event_reminders

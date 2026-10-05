@@ -12,6 +12,7 @@ for (const marker of [
   'for update skip locked',
   'event_reminders_active_identity_idx',
   'Australia/Adelaide',
+  '06:30',
   'p_grace_hours integer default 24',
   "status = 'expired'",
 ]) assert.ok(sql.toLowerCase().includes(marker.toLowerCase()), marker);
