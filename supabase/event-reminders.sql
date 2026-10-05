@@ -7,6 +7,7 @@ create table if not exists public.event_reminders (
   event_time text,
   event_location text,
   reminder text not null,
+  reminder_minutes integer not null default 15,
   due_at timestamptz not null,
   email text not null,
   sent_at timestamptz,
@@ -14,6 +15,9 @@ create table if not exists public.event_reminders (
   resend_id text,
   created_at timestamptz not null default now()
 );
+
+alter table public.event_reminders
+  add column if not exists reminder_minutes integer not null default 15;
 
 create index if not exists event_reminders_due_idx
   on public.event_reminders (due_at)
