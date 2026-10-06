@@ -136,7 +136,7 @@ declare
   v_due_at timestamptz;
   v_result public.event_reminders;
 begin
-  if auth.uid() is null then raise exception 'Authentication is required'; end if;
+  if coalesce(auth.role(), '') <> 'authenticated' or auth.uid() is null then raise exception 'Authentication is required'; end if;
   if p_event_id is null or length(trim(p_event_id)) = 0 or length(p_event_id) > 200 then raise exception 'Event id is invalid'; end if;
   if p_event_version is null or length(trim(p_event_version)) = 0 or length(p_event_version) > 200 then raise exception 'Event version is invalid'; end if;
   if p_event_title is null or length(trim(p_event_title)) = 0 or length(p_event_title) > 500 then raise exception 'Event title is invalid'; end if;
@@ -192,7 +192,7 @@ as $$
 declare
   v_count integer;
 begin
-  if auth.uid() is null then raise exception 'Authentication is required'; end if;
+  if coalesce(auth.role(), '') <> 'authenticated' or auth.uid() is null then raise exception 'Authentication is required'; end if;
   update public.event_reminders
   set status = 'cancelled', locked_at = null, claim_token = null, send_error = 'Cancelled with event'
   where event_id = p_event_id and owner_id = auth.uid() and status in ('pending', 'processing');
@@ -208,7 +208,7 @@ returns setof public.event_reminders
 language plpgsql security definer set search_path = public
 as $$
 begin
-  if auth.uid() is not null then raise exception 'Worker claims require service role'; end if;
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'Worker claims require service role'; end if;
   if p_limit is null or p_limit < 1 or p_limit > 100 then raise exception 'Invalid claim limit'; end if;
   if p_lease_minutes is null or p_lease_minutes < 1 or p_lease_minutes > 120 then raise exception 'Invalid lease'; end if;
   if p_grace_hours is null or p_grace_hours < 1 or p_grace_hours > 168 then raise exception 'Invalid grace window'; end if;
@@ -233,12 +233,47 @@ begin
 end;
 $$;
 
+create or replace function public.complete_event_reminder(
+  p_id uuid,
+  p_claim_token text,
+  p_success boolean,
+  p_resend_id text default null,
+  p_error text default null
+)
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_rows integer;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'Worker completion requires service role'; end if;
+  if p_id is null or p_claim_token is null or length(trim(p_claim_token)) = 0 then
+    raise exception 'Reminder completion identity is required';
+  end if;
+  if p_success is true then
+    update public.event_reminders
+    set status = 'sent', sent_at = now(), locked_at = null, claim_token = null,
+        send_error = null, resend_id = p_resend_id
+    where id = p_id and status = 'processing' and claim_token = p_claim_token;
+  else
+    update public.event_reminders
+    set status = case when attempt_count >= 3 then 'failed' else 'pending' end,
+        locked_at = null, claim_token = null, send_error = left(coalesce(p_error, 'Unknown send error'), 2000)
+    where id = p_id and status = 'processing' and claim_token = p_claim_token;
+  end if;
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+
 revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) from public, anon, authenticated;
 revoke all on function public.cancel_event_reminders(text) from public, anon, authenticated;
 revoke all on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) from public, anon, authenticated;
+revoke all on function public.complete_event_reminder(uuid,text,boolean,text,text) from public, anon, authenticated;
 grant execute on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) to authenticated;
 grant execute on function public.cancel_event_reminders(text) to authenticated;
 grant execute on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) to service_role;
+grant execute on function public.complete_event_reminder(uuid,text,boolean,text,text) to service_role;
 
 alter table public.event_reminders enable row level security;
 drop policy if exists "Anyone can add event reminders" on public.event_reminders;

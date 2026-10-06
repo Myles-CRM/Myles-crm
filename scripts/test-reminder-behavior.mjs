@@ -10,7 +10,7 @@ const moduleSource = source.replace(
   "import { createClient } from '@supabase/supabase-js';",
   'const createClient = () => { throw new Error("unexpected real client"); };',
 );
-const { processDueReminders } = await import(
+const { processDueReminders, isCronAuthorized } = await import(
   'data:text/javascript;base64,' + Buffer.from(moduleSource).toString('base64'),
 );
 
@@ -19,8 +19,14 @@ function fakeSupabase(reminder, { cancelBeforeSend = false, failPersist = false 
   return {
     state,
     rpc(name) {
-      assert.equal(name, 'claim_due_event_reminders');
-      return Promise.resolve({ data: [{ ...state.row, status: 'processing' }], error: null });
+      if (name === 'claim_due_event_reminders') {
+        return Promise.resolve({ data: [{ ...state.row, status: 'processing' }], error: null });
+      }
+      assert.equal(name, 'complete_event_reminder');
+      if (failPersist) return Promise.resolve({ data: null, error: { message: 'persistence failed' } });
+      state.row.status = 'sent';
+      state.row.claim_token = null;
+      return Promise.resolve({ data: true, error: null });
     },
     from() {
       const query = {
@@ -71,6 +77,12 @@ assert.equal(result.results[0].skipped, true);
 fake = fakeSupabase({ ...base, attempt_count: 3 }, { failPersist: true });
 result = await processDueReminders({ supabaseClient: fake, sendEmail: async () => ({ id: 'resend-2' }) });
 assert.equal(result.results[0].sent, false, 'persistence failure must not be reported as sent');
-assert.equal(result.results[0].persistenceError, 'persistence failed');
+assert.equal(result.results[0].completionUncertain, true, 'successful email with failed completion must be marked uncertain');
+
+delete process.env.CRON_SECRET;
+assert.equal(isCronAuthorized({ authorization: 'Bearer anything' }), false, 'missing cron secret must fail closed');
+process.env.CRON_SECRET = 'cron-test-secret';
+assert.equal(isCronAuthorized({ authorization: 'Bearer wrong' }), false, 'wrong cron secret must be rejected');
+assert.equal(isCronAuthorized({ authorization: 'Bearer cron-test-secret' }), true, 'correct cron secret must authorize');
 
 console.log('Reminder worker behavioral tests passed.');

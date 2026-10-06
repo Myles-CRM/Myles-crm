@@ -1013,6 +1013,11 @@
         renderSelectedDay();
       }
 
+      function newReminderVersion() {
+        if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
       function collectEventDraft(id = `local-${Date.now()}`) {
         const date = eventDate.value || selectedDate;
         return {
@@ -1028,7 +1033,7 @@
           reminderEnabled: eventReminderEnabled.checked,
           reminderMinutes: Math.max(0, Math.min(10080, Number(eventReminderMinutes.value) || 0)),
           reminderEmail: eventReminderEnabled.checked ? reminderEmailAddress : '',
-          reminderVersion: String(Date.now()),
+          reminderVersion: newReminderVersion(),
           repeat: eventRepeat.value,
           linkedContactIds: Array.from(eventContacts.selectedOptions).map((option) => option.value),
         };
