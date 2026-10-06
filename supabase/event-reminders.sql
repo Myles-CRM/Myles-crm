@@ -114,8 +114,6 @@ create index if not exists event_reminders_due_idx
   on public.event_reminders (due_at)
   where status = 'pending';
 
--- Legacy upgrade safety: revoke the old anonymous signature before dropping it.
-revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) from public, anon, authenticated;
 drop function if exists public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean);
 create or replace function public.replace_event_reminder(
   p_event_id text,
@@ -194,8 +192,6 @@ begin
 end;
 $$;
 
--- Legacy upgrade safety: revoke the old anonymous signature before dropping it.
-revoke all on function public.cancel_event_reminders(text) from public, anon, authenticated;
 drop function if exists public.cancel_event_reminders(text);
 create or replace function public.cancel_event_reminders(p_event_id text, p_owner_id uuid default null)
 returns integer
