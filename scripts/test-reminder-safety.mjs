@@ -5,6 +5,8 @@ const sql = fs.readFileSync(new URL('../supabase/event-reminders.sql', import.me
 const worker = fs.readFileSync(new URL('../lib/reminders.js', import.meta.url), 'utf8');
 const calendar = fs.readFileSync(new URL('../public/calendar.html', import.meta.url), 'utf8');
 const reminderApi = fs.readFileSync(new URL('../api/calendar-reminders.js', import.meta.url), 'utf8');
+const uiRecipient = calendar.match(/const reminderEmailAddress = '([^']+)'/)?.[1];
+assert.ok(uiRecipient, 'calendar must define a reminder recipient');
 
 for (const marker of [
   'replace_event_reminder',
@@ -48,6 +50,7 @@ assert.equal(calendar.includes("rpc('replace_event_reminder'"), false);
 assert.equal(calendar.includes("rpc('cancel_event_reminders'"), false);
 assert.match(reminderApi, /CRM_ADMIN_TOKEN/);
 assert.match(reminderApi, /p_owner_id: REMINDER_OWNER_ID/);
+assert.ok(sql.includes('lower(trim(p_email)) <> ' + "'" + uiRecipient + "'"), 'SQL validator must accept the calendar recipient');
 const replaceLegacyDrop = sql.indexOf('drop function if exists public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean)');
 const cancelLegacyDrop = sql.indexOf('drop function if exists public.cancel_event_reminders(text)');
 assert.ok(replaceLegacyDrop >= 0, 'replace legacy signature must be dropped if present');

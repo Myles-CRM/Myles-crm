@@ -150,7 +150,7 @@ begin
   if p_event_version is null or length(trim(p_event_version)) = 0 or length(p_event_version) > 200 then raise exception 'Event version is invalid'; end if;
   if p_event_title is null or length(trim(p_event_title)) = 0 or length(p_event_title) > 500 then raise exception 'Event title is invalid'; end if;
   if p_event_date is null then raise exception 'Event date is required'; end if;
-  if p_email is null or lower(trim(p_email)) <> 'tacotrump001@gmail.com' then raise exception 'Recipient is not allowed'; end if;
+  if p_email is null or lower(trim(p_email)) <> 'tacotrumpet001@gmail.com' then raise exception 'Recipient is not allowed'; end if;
   if p_minutes is null or p_minutes < 0 or p_minutes > 10080 then raise exception 'Reminder minutes must be between 0 and 10080'; end if;
   if p_event_timezone is null or p_event_timezone <> 'Australia/Adelaide' then raise exception 'Unsupported event timezone'; end if;
   if p_event_time is not null and p_event_time !~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' then raise exception 'Event time is invalid'; end if;
