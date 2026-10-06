@@ -39,7 +39,7 @@ function fakeSupabase(reminder, { cancelBeforeSend = false, failPersist = false 
             return Promise.resolve({ data: { id: state.row.id }, error: null });
           }
           if (cancelBeforeSend) state.row.status = 'cancelled';
-          return Promise.resolve({ data: { status: state.row.status }, error: null });
+          return Promise.resolve({ data: { status: state.row.status, claim_token: state.row.claim_token }, error: null });
         },
       };
       return query;
@@ -48,7 +48,7 @@ function fakeSupabase(reminder, { cancelBeforeSend = false, failPersist = false 
 }
 
 const base = {
-  id: 'r1', idempotency_key: 'event:v1:mail:15', attempt_count: 1,
+  id: 'r1', idempotency_key: 'event:v1:mail:15', claim_token: 'claim-1', attempt_count: 1,
   status: 'processing', event_title: 'Test event', event_date: '2026-10-06',
   event_time: '10:00', email: 'test@example.com',
 };

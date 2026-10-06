@@ -18,7 +18,11 @@ for (const marker of [
   'delete from public.event_reminders older',
   'p_event_time !~',
   'Invalid claim limit',
-  'returning 1',
+  'get diagnostics v_count = row_count',
+  'auth.uid() is null',
+  'owner_id = auth.uid()',
+  'event_at >= p_now - make_interval(hours => p_grace_hours)',
+  'claim_token = gen_random_uuid()::text',
 ]) assert.ok(sql.toLowerCase().includes(marker.toLowerCase()), marker);
 assert.match(worker, /Idempotency-Key/);
 assert.match(worker, /rpc\('claim_due_event_reminders'/);
@@ -27,7 +31,12 @@ assert.match(worker, /attempt_count >= 3/);
 assert.match(worker, /maybeSingle()/);
 assert.match(worker, /Claim was cancelled or lost/);
 assert.match(worker, /persistenceError/);
+assert.match(worker, /claim_token/);
 assert.match(calendar, /rpc\('replace_event_reminder'/);
 assert.match(calendar, /rpc\('cancel_event_reminders'/);
 assert.match(calendar, /p_event_timezone: 'Australia\/Adelaide'/);
+assert.doesNotMatch(sql, /grant execute on function public\.replace_event_reminder[^;]* to anon/i);
+assert.doesNotMatch(sql, /grant execute on function public\.cancel_event_reminders[^;]* to anon/i);
+assert.match(sql, /grant execute on function public\.replace_event_reminder[^;]* to authenticated/i);
+assert.match(sql, /grant execute on function public\.cancel_event_reminders[^;]* to authenticated/i);
 console.log('Reminder safety source checks passed.');

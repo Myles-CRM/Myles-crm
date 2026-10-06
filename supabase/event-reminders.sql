@@ -2,6 +2,7 @@
 -- Reminder delivery is authoritative in this table; calendar metadata is only display state.
 create table if not exists public.event_reminders (
   id uuid primary key default gen_random_uuid(),
+  owner_id uuid,
   event_id text,
   event_version text not null,
   event_title text not null,
@@ -18,6 +19,7 @@ create table if not exists public.event_reminders (
   attempt_count integer not null default 0,
   locked_at timestamptz,
   idempotency_key text not null default gen_random_uuid()::text,
+  claim_token text,
   sent_at timestamptz,
   send_error text,
   resend_id text,
@@ -28,6 +30,7 @@ create table if not exists public.event_reminders (
 
 -- Additive migration for the original reminder table.
 alter table public.event_reminders add column if not exists event_version text;
+alter table public.event_reminders add column if not exists owner_id uuid;
 alter table public.event_reminders add column if not exists event_id text;
 alter table public.event_reminders add column if not exists event_title text;
 alter table public.event_reminders add column if not exists event_date date;
@@ -42,6 +45,7 @@ alter table public.event_reminders add column if not exists status text;
 alter table public.event_reminders add column if not exists attempt_count integer;
 alter table public.event_reminders add column if not exists locked_at timestamptz;
 alter table public.event_reminders add column if not exists idempotency_key text;
+alter table public.event_reminders add column if not exists claim_token text;
 alter table public.event_reminders add column if not exists sent_at timestamptz;
 alter table public.event_reminders add column if not exists send_error text;
 alter table public.event_reminders add column if not exists resend_id text;
@@ -59,6 +63,7 @@ set event_version = coalesce(event_version, id::text),
     email = coalesce(email, 'tacotrumpet001@gmail.com'),
     attempt_count = coalesce(attempt_count, 0),
     idempotency_key = coalesce(idempotency_key, id::text),
+    claim_token = coalesce(claim_token, id::text),
     status = coalesce(status, case when sent_at is null then 'pending' else 'sent' end);
 update public.event_reminders
 set event_at = (event_date::text || ' ' || coalesce(nullif(event_time, ''), '06:30'))::timestamp at time zone event_timezone
@@ -97,6 +102,7 @@ alter table public.event_reminders alter column status set not null;
 alter table public.event_reminders alter column attempt_count set default 0;
 alter table public.event_reminders alter column attempt_count set not null;
 alter table public.event_reminders alter column idempotency_key set not null;
+alter table public.event_reminders alter column claim_token set default gen_random_uuid()::text;
 alter table public.event_reminders alter column created_at set default now();
 alter table public.event_reminders alter column created_at set not null;
 
@@ -130,6 +136,7 @@ declare
   v_due_at timestamptz;
   v_result public.event_reminders;
 begin
+  if auth.uid() is null then raise exception 'Authentication is required'; end if;
   if p_event_id is null or length(trim(p_event_id)) = 0 or length(p_event_id) > 200 then raise exception 'Event id is invalid'; end if;
   if p_event_version is null or length(trim(p_event_version)) = 0 or length(p_event_version) > 200 then raise exception 'Event version is invalid'; end if;
   if p_event_title is null or length(trim(p_event_title)) = 0 or length(p_event_title) > 500 then raise exception 'Event title is invalid'; end if;
@@ -139,22 +146,27 @@ begin
   if p_event_timezone is null or p_event_timezone <> 'Australia/Adelaide' then raise exception 'Unsupported event timezone'; end if;
   if p_event_time is not null and p_event_time !~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' then raise exception 'Event time is invalid'; end if;
   if p_event_location is not null and length(p_event_location) > 500 then raise exception 'Event location is invalid'; end if;
+  if exists (
+    select 1 from public.event_reminders
+    where event_id = p_event_id and status in ('pending', 'processing')
+      and owner_id is distinct from auth.uid()
+  ) then raise exception 'Event is owned by another user'; end if;
 
   -- All-day events use a 06:30 Adelaide wall-clock anchor. Timed events use their local wall-clock time.
   v_event_at := (p_event_date::text || ' ' || coalesce(nullif(p_event_time, ''), '06:30'))::timestamp at time zone p_event_timezone;
   v_due_at := v_event_at - make_interval(mins => p_minutes);
 
   update public.event_reminders
-  set status = 'cancelled', locked_at = null, send_error = 'Superseded by a newer event version'
-  where event_id = p_event_id and status in ('pending', 'processing');
+  set status = 'cancelled', locked_at = null, claim_token = null, send_error = 'Superseded by a newer event version'
+  where event_id = p_event_id and owner_id = auth.uid() and status in ('pending', 'processing');
 
   if not p_enabled then return; end if;
 
   insert into public.event_reminders (
-    event_id, event_version, event_title, event_date, event_time, event_timezone, event_at,
+    owner_id, event_id, event_version, event_title, event_date, event_time, event_timezone, event_at,
     event_location, reminder, reminder_minutes, due_at, email, idempotency_key
   ) values (
-    p_event_id, p_event_version, p_event_title, p_event_date, p_event_time, p_event_timezone, v_event_at,
+    auth.uid(), p_event_id, p_event_version, p_event_title, p_event_date, p_event_time, p_event_timezone, v_event_at,
     p_event_location, p_minutes::text || ' minutes before', p_minutes, v_due_at, lower(trim(p_email)),
     p_event_id || ':' || p_event_version || ':' || lower(trim(p_email)) || ':' || p_minutes
   )
@@ -164,7 +176,7 @@ begin
     event_location = excluded.event_location, due_at = excluded.due_at, status = 'pending', locked_at = null;
 
   select * into v_result from public.event_reminders
-  where event_id = p_event_id and event_version = p_event_version and email = p_email
+  where event_id = p_event_id and event_version = p_event_version and email = lower(trim(p_email))
     and reminder_minutes = p_minutes and status = 'pending'
   order by created_at desc limit 1;
   return v_result;
@@ -173,14 +185,20 @@ $$;
 
 create or replace function public.cancel_event_reminders(p_event_id text)
 returns integer
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
-  with cancelled as (update public.event_reminders
-  set status = 'cancelled', locked_at = null, send_error = 'Cancelled with event'
-  where event_id = p_event_id and status in ('pending', 'processing') returning 1)
-  select count(*)::integer from cancelled;
+declare
+  v_count integer;
+begin
+  if auth.uid() is null then raise exception 'Authentication is required'; end if;
+  update public.event_reminders
+  set status = 'cancelled', locked_at = null, claim_token = null, send_error = 'Cancelled with event'
+  where event_id = p_event_id and owner_id = auth.uid() and status in ('pending', 'processing');
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
 $$;
 
 create or replace function public.claim_due_event_reminders(
@@ -190,35 +208,39 @@ returns setof public.event_reminders
 language plpgsql security definer set search_path = public
 as $$
 begin
+  if auth.uid() is not null then raise exception 'Worker claims require service role'; end if;
   if p_limit is null or p_limit < 1 or p_limit > 100 then raise exception 'Invalid claim limit'; end if;
   if p_lease_minutes is null or p_lease_minutes < 1 or p_lease_minutes > 120 then raise exception 'Invalid lease'; end if;
   if p_grace_hours is null or p_grace_hours < 1 or p_grace_hours > 168 then raise exception 'Invalid grace window'; end if;
 
   update public.event_reminders
-  set status = 'expired', locked_at = null, send_error = 'Reminder expired after outage grace window'
+  set status = 'expired', locked_at = null, claim_token = null, send_error = 'Reminder expired after outage grace window'
   where status in ('pending', 'processing') and due_at < p_now - make_interval(hours => p_grace_hours);
 
   return query
   with candidates as (
     select id from public.event_reminders
-    where due_at <= p_now and event_at > p_now and attempt_count < 3
+    where due_at <= p_now
+      and event_at >= p_now - make_interval(hours => p_grace_hours)
+      and attempt_count < 3
       and (status = 'pending' or (status = 'processing' and locked_at is not null and locked_at < p_now - make_interval(mins => p_lease_minutes)))
     order by due_at, created_at for update skip locked limit p_limit
   )
   update public.event_reminders r
-  set status = 'processing', locked_at = p_now, attempt_count = r.attempt_count + 1, send_error = null
+  set status = 'processing', locked_at = p_now, claim_token = gen_random_uuid()::text,
+      attempt_count = r.attempt_count + 1, send_error = null
   from candidates where r.id = candidates.id returning r.*;
 end;
 $$;
 
-revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) from public, authenticated;
-revoke all on function public.cancel_event_reminders(text) from public, authenticated;
+revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) from public, anon, authenticated;
+revoke all on function public.cancel_event_reminders(text) from public, anon, authenticated;
 revoke all on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) from public, anon, authenticated;
-grant execute on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) to anon;
-grant execute on function public.cancel_event_reminders(text) to anon;
+grant execute on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) to authenticated;
+grant execute on function public.cancel_event_reminders(text) to authenticated;
 grant execute on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) to service_role;
 
 alter table public.event_reminders enable row level security;
 drop policy if exists "Anyone can add event reminders" on public.event_reminders;
-create policy "Reminder RPC owns inserts" on public.event_reminders for insert to anon with check (false);
+create policy "Reminder RPC owns inserts" on public.event_reminders for insert to authenticated with check (false);
 -- Service role performs claims and delivery updates; the browser uses the two RPCs above.
