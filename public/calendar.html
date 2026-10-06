@@ -73,16 +73,12 @@
                   <label>Ends<input id="eventEndDate" type="date" /></label>
                   <label>Time<input id="eventEndTime" type="time" /></label>
                 </div>
-                <label>Reminder
-                  <select id="eventReminder">
-                    <option value="none">None</option>
-                    <option value="at time">At time of event</option>
-                    <option value="5 minutes before">5 minutes before</option>
-                    <option value="15 minutes before">15 minutes before</option>
-                    <option value="30 minutes before">30 minutes before</option>
-                    <option value="1 hour before">1 hour before</option>
-                    <option value="1 day before">1 day before</option>
-                  </select>
+                <label class="toggle-row">
+                  <span>Send me a reminder</span>
+                  <input id="eventReminderEnabled" type="checkbox" />
+                </label>
+                <label>Minutes before the event
+                  <input id="eventReminderMinutes" type="number" min="0" max="10080" step="1" value="15" inputmode="numeric" disabled />
                 </label>
                 <label>Repeat
                   <select id="eventRepeat">
@@ -162,7 +158,8 @@
       const eventEndTime = document.getElementById('eventEndTime');
       const eventLocation = document.getElementById('eventLocation');
       const eventAllDay = document.getElementById('eventAllDay');
-      const eventReminder = document.getElementById('eventReminder');
+      const eventReminderEnabled = document.getElementById('eventReminderEnabled');
+      const eventReminderMinutes = document.getElementById('eventReminderMinutes');
       const eventRepeat = document.getElementById('eventRepeat');
       const eventContacts = document.getElementById('eventContacts');
       const addEventButton = document.getElementById('addEvent');
@@ -249,6 +246,9 @@
           allDay: Boolean(event.allDay),
           location: event.location || '',
           reminder: event.reminder || 'none',
+          reminderEnabled: event.reminderEnabled !== undefined ? Boolean(event.reminderEnabled) : Boolean(event.reminder && event.reminder !== 'none'),
+          reminderMinutes: Number.isFinite(Number(event.reminderMinutes)) ? Number(event.reminderMinutes) : parseLegacyReminderMinutes(event.reminder),
+          reminderVersion: event.reminderVersion ? String(event.reminderVersion) : '',
           reminderEmail: event.reminderEmail || '',
           repeat: event.repeat || 'never',
           cloudEventId: event.cloudEventId ? String(event.cloudEventId) : '',
@@ -258,6 +258,15 @@
           sourceName: event.sourceName || '',
           hidden: Boolean(event.hidden),
         };
+      }
+
+      function parseLegacyReminderMinutes(reminder) {
+        if (!reminder || reminder === 'none') return 15;
+        if (reminder === 'at time') return 0;
+        const match = String(reminder).match(/(\d+)\s+(minute|hour|day)/i);
+        if (!match) return 15;
+        const amount = Number(match[1]);
+        return match[2].toLowerCase() === 'hour' ? amount * 60 : match[2].toLowerCase() === 'day' ? amount * 1440 : amount;
       }
 
       function loadLocalEvents() {
@@ -648,55 +657,57 @@
       }
 
       function getReminderDueAt(event) {
-        if (!event.reminder || event.reminder === 'none') return '';
+        if (!event.reminderEnabled) return '';
 
-        const eventTime = event.time || '09:00';
+        const eventTime = event.time || '06:30';
         const eventDateTime = new Date(`${event.date}T${eventTime}`);
         if (Number.isNaN(eventDateTime.getTime())) return '';
 
-        const offsets = {
-          'at time': 0,
-          '5 minutes before': 5,
-          '15 minutes before': 15,
-          '30 minutes before': 30,
-          '1 hour before': 60,
-          '1 day before': 24 * 60,
-        };
-        const minutesBefore = offsets[event.reminder];
-        if (minutesBefore === undefined) return '';
+        const minutesBefore = Number(event.reminderMinutes);
+        if (!Number.isInteger(minutesBefore) || minutesBefore < 0 || minutesBefore > 10080) return '';
 
         return new Date(eventDateTime.getTime() - minutesBefore * 60 * 1000).toISOString();
       }
 
       async function saveCloudReminder(event, cloudEvent) {
-        if (!window.supabase || !event.reminder || event.reminder === 'none') return { saved: false, skipped: true };
-
-        const dueAt = getReminderDueAt(event);
-        if (!dueAt) throw new Error('Could not calculate reminder time.');
-
-        const { error } = await window.supabase
-          .from('event_reminders')
-          .insert([{
-            event_id: String(cloudEvent.id),
-            event_title: event.title,
-            event_date: event.date,
-            event_time: event.time || null,
-            event_location: event.location || null,
-            reminder: event.reminder,
-            due_at: dueAt,
-            email: event.reminderEmail || reminderEmailAddress,
-          }]);
-
-        if (error) throw error;
-        return { saved: true, dueAt };
+        if (!cloudEvent?.id) return { saved: false, skipped: true };
+        const token = localStorage.getItem('crm_admin_passcode') || '';
+        if (!token) return { saved: false, skipped: true, authRequired: true };
+        const response = await fetch('/api/calendar-reminders', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'replace', data: {
+            p_event_id: String(cloudEvent.id),
+            p_event_version: String(event.reminderVersion || newReminderVersion()),
+            p_event_title: event.title,
+            p_event_date: event.date,
+            p_event_time: event.time || null,
+            p_event_timezone: 'Australia/Adelaide',
+            p_event_location: event.location || null,
+            p_minutes: Number(event.reminderMinutes),
+            p_email: event.reminderEmail || reminderEmailAddress,
+            p_enabled: Boolean(event.reminderEnabled),
+          } }),
+        });
+        if (response.status === 401) return { saved: false, skipped: true, authRequired: true };
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Reminder save failed');
+        return { saved: Boolean(result.data), skipped: !result.data };
       }
 
       async function deleteCloudReminders(event) {
-        if (!window.supabase) return;
-        await window.supabase
-          .from('event_reminders')
-          .delete()
-          .eq('event_id', String(event.id));
+        if (!event?.id) return { skipped: true };
+        const token = localStorage.getItem('crm_admin_passcode') || '';
+        if (!token) return { skipped: true, authRequired: true };
+        const response = await fetch('/api/calendar-reminders', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', eventId: String(event.id) }),
+        });
+        if (response.status === 401) return { skipped: true, authRequired: true };
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Reminder cancellation failed');
+        return { cancelled: true, count: result.data };
       }
 
       function getSourceLabel(event) {
@@ -1017,6 +1028,11 @@
         renderSelectedDay();
       }
 
+      function newReminderVersion() {
+        if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
       function collectEventDraft(id = `local-${Date.now()}`) {
         const date = eventDate.value || selectedDate;
         return {
@@ -1028,8 +1044,11 @@
           endTime: eventAllDay.checked ? '' : eventEndTime.value,
           allDay: eventAllDay.checked,
           location: eventLocation.value.trim(),
-          reminder: eventReminder.value,
-          reminderEmail: eventReminder.value === 'none' ? '' : reminderEmailAddress,
+          reminder: eventReminderEnabled.checked ? String(eventReminderMinutes.value || 0) + ' minutes before' : 'none',
+          reminderEnabled: eventReminderEnabled.checked,
+          reminderMinutes: Math.max(0, Math.min(10080, Number(eventReminderMinutes.value) || 0)),
+          reminderEmail: eventReminderEnabled.checked ? reminderEmailAddress : '',
+          reminderVersion: newReminderVersion(),
           repeat: eventRepeat.value,
           linkedContactIds: Array.from(eventContacts.selectedOptions).map((option) => option.value),
         };
@@ -1049,7 +1068,9 @@
         eventAllDay.checked = false;
         eventTime.disabled = false;
         eventEndTime.disabled = false;
-        eventReminder.value = 'none';
+        eventReminderEnabled.checked = false;
+        eventReminderMinutes.value = '15';
+        eventReminderMinutes.disabled = true;
         eventRepeat.value = 'never';
         Array.from(eventContacts.options).forEach((option) => { option.selected = false; });
       }
@@ -1077,7 +1098,9 @@
         eventAllDay.checked = Boolean(editableEvent.allDay);
         eventTime.disabled = eventAllDay.checked;
         eventEndTime.disabled = eventAllDay.checked;
-        eventReminder.value = editableEvent.reminder || 'none';
+        eventReminderEnabled.checked = Boolean(editableEvent.reminderEnabled);
+        eventReminderMinutes.value = String(editableEvent.reminderMinutes ?? 15);
+        eventReminderMinutes.disabled = !eventReminderEnabled.checked;
         eventRepeat.value = editableEvent.repeat || 'never';
         Array.from(eventContacts.options).forEach((option) => {
           option.selected = (editableEvent.linkedContactIds || []).map(String).includes(String(option.value));
@@ -1096,7 +1119,6 @@
 
         if (editingEventSource === 'cloud') {
           const cloudEvent = await updateCloudEvent(editingEventId, eventDraft);
-          await deleteCloudReminders(originalEvent);
           let reminderResult = { saved: false, skipped: true };
           try {
             reminderResult = await saveCloudReminder(eventDraft, cloudEvent);
@@ -1109,6 +1131,7 @@
             cloudEventId: String(cloudEvent.id),
             isCloudMeta: true,
           });
+          if (reminderResult.authRequired) return 'Changes saved to cloud. Save the Admin passcode to enable email reminders.';
           return reminderResult.saved ? 'Changes saved to cloud. Email reminder is queued.' : 'Changes saved to cloud.';
         }
 
@@ -1142,9 +1165,11 @@
               isCloudMeta: true,
             });
             saveLocalEvents(localEvents);
-            if (eventDraft.reminder !== 'none' && reminderResult.saved) {
+            if (eventDraft.reminderEnabled && reminderResult.authRequired) {
+              eventSaveStatus.textContent = 'Saved to Supabase. Save the Admin passcode to enable email reminders.';
+            } else if (eventDraft.reminderEnabled && reminderResult.saved) {
               eventSaveStatus.textContent = 'Saved to Supabase. Email reminder is queued.';
-            } else if (eventDraft.reminder !== 'none') {
+            } else if (eventDraft.reminderEnabled) {
               eventSaveStatus.textContent = 'Saved to Supabase. Reminder needs the event_reminders table before emails can send.';
             } else {
               eventSaveStatus.textContent = 'Saved to Supabase.';
@@ -1214,6 +1239,11 @@
           eventTime.value = '';
           eventEndTime.value = '';
         }
+      });
+
+      eventReminderEnabled.addEventListener('change', () => {
+        eventReminderMinutes.disabled = !eventReminderEnabled.checked;
+        if (eventReminderEnabled.checked && !eventReminderMinutes.value) eventReminderMinutes.value = '15';
       });
 
       prevMonthButton.addEventListener('click', () => {
