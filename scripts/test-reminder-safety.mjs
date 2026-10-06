@@ -15,11 +15,18 @@ for (const marker of [
   '06:30',
   'p_grace_hours integer default 24',
   "status = 'expired'",
+  'delete from public.event_reminders older',
+  'p_event_time !~',
+  'Invalid claim limit',
+  'returning 1',
 ]) assert.ok(sql.toLowerCase().includes(marker.toLowerCase()), marker);
 assert.match(worker, /Idempotency-Key/);
 assert.match(worker, /rpc\('claim_due_event_reminders'/);
 assert.match(worker, /status: 'sent'/);
 assert.match(worker, /attempt_count >= 3/);
+assert.match(worker, /maybeSingle()/);
+assert.match(worker, /Claim was cancelled or lost/);
+assert.match(worker, /persistenceError/);
 assert.match(calendar, /rpc\('replace_event_reminder'/);
 assert.match(calendar, /rpc\('cancel_event_reminders'/);
 assert.match(calendar, /p_event_timezone: 'Australia\/Adelaide'/);

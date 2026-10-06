@@ -11,7 +11,8 @@
     "build": "echo \"No build step configured\"",
     "lint": "echo \"No linter configured\"",
     "test:buddy-inbox": "node scripts/test-buddy-inbox-actions.mjs",
-    "test:reminder-safety": "node scripts/test-reminder-safety.mjs"
+    "test:reminder-safety": "node scripts/test-reminder-safety.mjs",
+    "test:reminder-behavior": "node scripts/test-reminder-behavior.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0"
