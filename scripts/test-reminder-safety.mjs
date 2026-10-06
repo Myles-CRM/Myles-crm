@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const sql = fs.readFileSync(new URL('../supabase/event-reminders.sql', import.meta.url), 'utf8');
 const worker = fs.readFileSync(new URL('../lib/reminders.js', import.meta.url), 'utf8');
 const calendar = fs.readFileSync(new URL('../public/calendar.html', import.meta.url), 'utf8');
+const reminderApi = fs.readFileSync(new URL('../api/calendar-reminders.js', import.meta.url), 'utf8');
 
 for (const marker of [
   'replace_event_reminder',
@@ -19,10 +20,10 @@ for (const marker of [
   'p_event_time !~',
   'Invalid claim limit',
   'get diagnostics v_count = row_count',
-  'auth.uid() is null',
-  "auth.role(), '') <> 'authenticated'",
-  "auth.role(), '') <> 'service_role'",
-  'owner_id = auth.uid()',
+  'auth.uid() is not null',
+  'Authenticated owner or server owner is required',
+  "= 'service_role'",
+  'owner_id = v_owner_id',
   'event_at >= p_now - make_interval(hours => p_grace_hours)',
   'claim_token = gen_random_uuid()::text',
   'complete_event_reminder',
@@ -39,11 +40,14 @@ assert.match(worker, /persistenceError/);
 assert.match(worker, /claim_token/);
 assert.match(worker, /complete_event_reminder/);
 assert.match(worker, /completionUncertain/);
-assert.match(calendar, /rpc\('replace_event_reminder'/);
-assert.match(calendar, /rpc\('cancel_event_reminders'/);
 assert.match(calendar, /p_event_timezone: 'Australia\/Adelaide'/);
 assert.match(calendar, /crypto\?\.randomUUID/);
 assert.match(calendar, /newReminderVersion/);
+assert.match(calendar, /api\/calendar-reminders/);
+assert.equal(calendar.includes("rpc('replace_event_reminder'"), false);
+assert.equal(calendar.includes("rpc('cancel_event_reminders'"), false);
+assert.match(reminderApi, /CRM_ADMIN_TOKEN/);
+assert.match(reminderApi, /p_owner_id: REMINDER_OWNER_ID/);
 assert.doesNotMatch(sql, /grant execute on function public\.replace_event_reminder[^;]* to anon/i);
 assert.doesNotMatch(sql, /grant execute on function public\.cancel_event_reminders[^;]* to anon/i);
 assert.match(sql, /grant execute on function public\.replace_event_reminder[^;]* to authenticated/i);

@@ -114,6 +114,7 @@ create index if not exists event_reminders_due_idx
   on public.event_reminders (due_at)
   where status = 'pending';
 
+drop function if exists public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean);
 create or replace function public.replace_event_reminder(
   p_event_id text,
   p_event_version text,
@@ -124,7 +125,8 @@ create or replace function public.replace_event_reminder(
   p_event_location text,
   p_minutes integer,
   p_email text,
-  p_enabled boolean
+  p_enabled boolean,
+  p_owner_id uuid default null
 )
 returns public.event_reminders
 language plpgsql
@@ -134,9 +136,16 @@ as $$
 declare
   v_event_at timestamptz;
   v_due_at timestamptz;
+  v_owner_id uuid;
   v_result public.event_reminders;
 begin
-  if coalesce(auth.role(), '') <> 'authenticated' or auth.uid() is null then raise exception 'Authentication is required'; end if;
+  if coalesce(auth.role(), '') = 'authenticated' and auth.uid() is not null then
+    v_owner_id := auth.uid();
+  elsif coalesce(auth.role(), '') = 'service_role' and p_owner_id is not null then
+    v_owner_id := p_owner_id;
+  else
+    raise exception 'Authenticated owner or server owner is required';
+  end if;
   if p_event_id is null or length(trim(p_event_id)) = 0 or length(p_event_id) > 200 then raise exception 'Event id is invalid'; end if;
   if p_event_version is null or length(trim(p_event_version)) = 0 or length(p_event_version) > 200 then raise exception 'Event version is invalid'; end if;
   if p_event_title is null or length(trim(p_event_title)) = 0 or length(p_event_title) > 500 then raise exception 'Event title is invalid'; end if;
@@ -149,7 +158,7 @@ begin
   if exists (
     select 1 from public.event_reminders
     where event_id = p_event_id and status in ('pending', 'processing')
-      and owner_id is distinct from auth.uid()
+      and owner_id is distinct from v_owner_id
   ) then raise exception 'Event is owned by another user'; end if;
 
   -- All-day events use a 06:30 Adelaide wall-clock anchor. Timed events use their local wall-clock time.
@@ -158,7 +167,7 @@ begin
 
   update public.event_reminders
   set status = 'cancelled', locked_at = null, claim_token = null, send_error = 'Superseded by a newer event version'
-  where event_id = p_event_id and owner_id = auth.uid() and status in ('pending', 'processing');
+  where event_id = p_event_id and owner_id = v_owner_id and status in ('pending', 'processing');
 
   if not p_enabled then return; end if;
 
@@ -166,7 +175,7 @@ begin
     owner_id, event_id, event_version, event_title, event_date, event_time, event_timezone, event_at,
     event_location, reminder, reminder_minutes, due_at, email, idempotency_key
   ) values (
-    auth.uid(), p_event_id, p_event_version, p_event_title, p_event_date, p_event_time, p_event_timezone, v_event_at,
+    v_owner_id, p_event_id, p_event_version, p_event_title, p_event_date, p_event_time, p_event_timezone, v_event_at,
     p_event_location, p_minutes::text || ' minutes before', p_minutes, v_due_at, lower(trim(p_email)),
     p_event_id || ':' || p_event_version || ':' || lower(trim(p_email)) || ':' || p_minutes
   )
@@ -183,7 +192,8 @@ begin
 end;
 $$;
 
-create or replace function public.cancel_event_reminders(p_event_id text)
+drop function if exists public.cancel_event_reminders(text);
+create or replace function public.cancel_event_reminders(p_event_id text, p_owner_id uuid default null)
 returns integer
 language plpgsql
 security definer
@@ -191,11 +201,18 @@ set search_path = public
 as $$
 declare
   v_count integer;
+  v_owner_id uuid;
 begin
-  if coalesce(auth.role(), '') <> 'authenticated' or auth.uid() is null then raise exception 'Authentication is required'; end if;
+  if coalesce(auth.role(), '') = 'authenticated' and auth.uid() is not null then
+    v_owner_id := auth.uid();
+  elsif coalesce(auth.role(), '') = 'service_role' and p_owner_id is not null then
+    v_owner_id := p_owner_id;
+  else
+    raise exception 'Authenticated owner or server owner is required';
+  end if;
   update public.event_reminders
   set status = 'cancelled', locked_at = null, claim_token = null, send_error = 'Cancelled with event'
-  where event_id = p_event_id and owner_id = auth.uid() and status in ('pending', 'processing');
+  where event_id = p_event_id and owner_id = v_owner_id and status in ('pending', 'processing');
   get diagnostics v_count = row_count;
   return v_count;
 end;
@@ -266,12 +283,12 @@ begin
 end;
 $$;
 
-revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) from public, anon, authenticated;
-revoke all on function public.cancel_event_reminders(text) from public, anon, authenticated;
+revoke all on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean,uuid) from public, anon, authenticated;
+revoke all on function public.cancel_event_reminders(text,uuid) from public, anon, authenticated;
 revoke all on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) from public, anon, authenticated;
 revoke all on function public.complete_event_reminder(uuid,text,boolean,text,text) from public, anon, authenticated;
-grant execute on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean) to authenticated;
-grant execute on function public.cancel_event_reminders(text) to authenticated;
+grant execute on function public.replace_event_reminder(text,text,text,date,text,text,text,integer,text,boolean,uuid) to authenticated, service_role;
+grant execute on function public.cancel_event_reminders(text,uuid) to authenticated, service_role;
 grant execute on function public.claim_due_event_reminders(timestamptz,integer,integer,integer) to service_role;
 grant execute on function public.complete_event_reminder(uuid,text,boolean,text,text) to service_role;
 

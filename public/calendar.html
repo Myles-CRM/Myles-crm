@@ -670,29 +670,44 @@
       }
 
       async function saveCloudReminder(event, cloudEvent) {
-        if (!window.supabase || !cloudEvent?.id) return { saved: false, skipped: true };
-
-        const { data, error } = await window.supabase.rpc('replace_event_reminder', {
-          p_event_id: String(cloudEvent.id),
-          p_event_version: String(event.reminderVersion || Date.now()),
-          p_event_title: event.title,
-          p_event_date: event.date,
-          p_event_time: event.time || null,
-          p_event_timezone: 'Australia/Adelaide',
-          p_event_location: event.location || null,
-          p_minutes: Number(event.reminderMinutes),
-          p_email: event.reminderEmail || reminderEmailAddress,
-          p_enabled: Boolean(event.reminderEnabled),
+        if (!cloudEvent?.id) return { saved: false, skipped: true };
+        const token = localStorage.getItem('crm_admin_passcode') || '';
+        if (!token) return { saved: false, skipped: true, authRequired: true };
+        const response = await fetch('/api/calendar-reminders', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'replace', data: {
+            p_event_id: String(cloudEvent.id),
+            p_event_version: String(event.reminderVersion || newReminderVersion()),
+            p_event_title: event.title,
+            p_event_date: event.date,
+            p_event_time: event.time || null,
+            p_event_timezone: 'Australia/Adelaide',
+            p_event_location: event.location || null,
+            p_minutes: Number(event.reminderMinutes),
+            p_email: event.reminderEmail || reminderEmailAddress,
+            p_enabled: Boolean(event.reminderEnabled),
+          } }),
         });
-
-        if (error) throw error;
-        return { saved: Boolean(data), skipped: !data };
+        if (response.status === 401) return { saved: false, skipped: true, authRequired: true };
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Reminder save failed');
+        return { saved: Boolean(result.data), skipped: !result.data };
       }
 
       async function deleteCloudReminders(event) {
-        if (!window.supabase || !event?.id) return;
-        const { error } = await window.supabase.rpc('cancel_event_reminders', { p_event_id: String(event.id) });
-        if (error) throw error;
+        if (!event?.id) return { skipped: true };
+        const token = localStorage.getItem('crm_admin_passcode') || '';
+        if (!token) return { skipped: true, authRequired: true };
+        const response = await fetch('/api/calendar-reminders', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', eventId: String(event.id) }),
+        });
+        if (response.status === 401) return { skipped: true, authRequired: true };
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Reminder cancellation failed');
+        return { cancelled: true, count: result.data };
       }
 
       function getSourceLabel(event) {
@@ -1116,6 +1131,7 @@
             cloudEventId: String(cloudEvent.id),
             isCloudMeta: true,
           });
+          if (reminderResult.authRequired) return 'Changes saved to cloud. Save the Admin passcode to enable email reminders.';
           return reminderResult.saved ? 'Changes saved to cloud. Email reminder is queued.' : 'Changes saved to cloud.';
         }
 
@@ -1149,7 +1165,9 @@
               isCloudMeta: true,
             });
             saveLocalEvents(localEvents);
-            if (eventDraft.reminderEnabled && reminderResult.saved) {
+            if (eventDraft.reminderEnabled && reminderResult.authRequired) {
+              eventSaveStatus.textContent = 'Saved to Supabase. Save the Admin passcode to enable email reminders.';
+            } else if (eventDraft.reminderEnabled && reminderResult.saved) {
               eventSaveStatus.textContent = 'Saved to Supabase. Email reminder is queued.';
             } else if (eventDraft.reminderEnabled) {
               eventSaveStatus.textContent = 'Saved to Supabase. Reminder needs the event_reminders table before emails can send.';
