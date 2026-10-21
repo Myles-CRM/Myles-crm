@@ -35,7 +35,7 @@
           </div>
           <div class="status-tile waiting">
             <strong>Waiting for Dad</strong>
-            <span>Needs the real email service key and webhook secret added safely.</span>
+            <span>Needs the private Resend API key, webhook signing secret, and database settings to be configured.</span>
           </div>
           <div class="status-tile safe">
             <strong>Safety first</strong>
@@ -98,10 +98,10 @@
           <ul class="setup-list code-list">
             <li><code>SUPABASE_SERVICE_KEY</code> — lets the server save private inbox messages.</li>
             <li><code>RESEND_API_KEY</code> — lets the server read the full forwarded email body.</li>
-            <li><code>BUDDY_INBOX_WEBHOOK_TOKEN</code> — secret token to stop random posts.</li>
+            <li><code>RESEND_WEBHOOK_SECRET</code> — verifies that posts really came from Resend.</li>
             <li><code>BUDDY_INBOX_ACTION_TOKEN</code> — separate private token so Buddy can review/file inbox messages using a private action header.</li>
             <li><code>BUDDY_INBOX_ALLOWED_TO</code> — the Buddy email address allowed to receive.</li>
-            <li>Inbound email service/webhook pointed at <code>/api/buddy-inbox</code> with the webhook secret configured privately.</li>
+            <li>Resend Receiving webhook points at <code>/api/buddy-inbox</code>; the private API stores full message content and the Buddy action route lists selected messages.</li>
           </ul>
         </article>
       </section>

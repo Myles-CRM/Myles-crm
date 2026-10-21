@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const BUDDY_INBOX_WEBHOOK_TOKEN = process.env.BUDDY_INBOX_WEBHOOK_TOKEN;
+const RESEND_WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET;
 const BUDDY_INBOX_ALLOWED_TO = (process.env.BUDDY_INBOX_ALLOWED_TO || '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
@@ -18,7 +19,8 @@ function configStatus() {
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
   if (!RESEND_API_KEY) missing.push('RESEND_API_KEY');
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) missing.push('BUDDY_INBOX_WEBHOOK_TOKEN');
+  if (!RESEND_WEBHOOK_SECRET) missing.push('RESEND_WEBHOOK_SECRET');
+  if (!BUDDY_INBOX_ALLOWED_TO.length) missing.push('BUDDY_INBOX_ALLOWED_TO');
   return { ready: missing.length === 0, missing };
 }
 
@@ -26,15 +28,40 @@ function headerValue(headers, name) {
   return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || '';
 }
 
-function requestToken(req) {
-  const auth = headerValue(req.headers, 'authorization');
-  if (auth.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
-  return headerValue(req.headers, 'x-buddy-inbox-token') || req.query?.token || '';
+function rawBody(req) {
+  if (typeof req.rawBody === 'string') return req.rawBody;
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody.toString('utf8');
+  if (typeof req.body === 'string') return req.body;
+  return JSON.stringify(req.body || {});
 }
 
-function isAuthorized(req) {
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) return false;
-  return requestToken(req) === BUDDY_INBOX_WEBHOOK_TOKEN;
+async function readRawBody(req) {
+  if (req.readableEnded || typeof req.on !== 'function') return rawBody(req);
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function verifyResendWebhook(payload, headers) {
+  const id = headerValue(headers, 'svix-id');
+  const timestamp = headerValue(headers, 'svix-timestamp');
+  const signature = headerValue(headers, 'svix-signature');
+  if (!id || !timestamp || !signature || !RESEND_WEBHOOK_SECRET) return false;
+
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() / 1000 - timestampNumber) > 300) return false;
+
+  const secretValue = RESEND_WEBHOOK_SECRET.startsWith('whsec_')
+    ? RESEND_WEBHOOK_SECRET.slice('whsec_'.length)
+    : RESEND_WEBHOOK_SECRET;
+  const secret = Buffer.from(secretValue, 'base64');
+  const expected = createHmac('sha256', secret).update(id + '.' + timestamp + '.' + payload).digest('base64');
+  return signature.split(' ').some((candidate) => {
+    const value = candidate.startsWith('v1,') ? candidate.slice(3) : '';
+    const actual = Buffer.from(value);
+    const wanted = Buffer.from(expected);
+    return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+  });
 }
 
 function asArray(value) {
@@ -75,7 +102,7 @@ async function fetchReceivedEmail(emailId) {
   const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
     headers: {
       Accept: 'application/json',
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: 'Bearer ' + RESEND_API_KEY,
     },
   });
 
@@ -124,6 +151,8 @@ function allowedRecipient(message) {
   return recipients.some((email) => BUDDY_INBOX_ALLOWED_TO.includes(email));
 }
 
+export const config = { api: { bodyParser: false } };
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const status = configStatus();
@@ -148,15 +177,30 @@ export default async function handler(req, res) {
     return jsonResponse(res, 503, { ok: false, skipped: true, reason: `Missing ${status.missing.join(', ')}` });
   }
 
-  if (!isAuthorized(req)) {
-    return jsonResponse(res, 401, { ok: false, error: 'Unauthorized' });
+  const payloadText = await readRawBody(req);
+  if (Buffer.byteLength(payloadText, 'utf8') > 2 * 1024 * 1024) {
+    return jsonResponse(res, 413, { ok: false, error: 'Webhook payload too large' });
   }
 
-  let message = normalisePayload(req.body || {});
-  if (message.event_type === 'email.received' && message.email_id) {
+  let payload;
+  try {
+    payload = JSON.parse(payloadText || '{}');
+  } catch {
+    return jsonResponse(res, 400, { ok: false, error: 'Invalid JSON payload' });
+  }
+
+  if (!verifyResendWebhook(payloadText, req.headers || {})) {
+    return jsonResponse(res, 401, { ok: false, error: 'Invalid Resend webhook signature' });
+  }
+
+  let message = normalisePayload(payload);
+  if (message.event_type !== 'email.received') {
+    return jsonResponse(res, 202, { ok: true, skipped: true, reason: 'Event is not an inbound email' });
+  }
+  if (message.email_id) {
     try {
       const receivedEmail = await fetchReceivedEmail(message.email_id);
-      message = normalisePayload(req.body || {}, receivedEmail);
+      message = normalisePayload(payload, receivedEmail);
     } catch (error) {
       return jsonResponse(res, 502, { ok: false, error: error.message || 'Could not fetch received email body' });
     }
@@ -174,6 +218,9 @@ export default async function handler(req, res) {
     .single();
 
   if (error) {
+    if (error.code === '23505' && message.email_id) {
+      return jsonResponse(res, 200, { ok: true, duplicate: true, emailId: message.email_id });
+    }
     return jsonResponse(res, 500, { ok: false, error: error.message || 'Could not save Buddy Inbox message' });
   }
 

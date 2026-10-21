@@ -22,6 +22,10 @@ create table if not exists public.buddy_inbox_messages (
   created_at timestamptz not null default now()
 );
 
+create unique index if not exists buddy_inbox_messages_email_id_idx
+  on public.buddy_inbox_messages (email_id)
+  where email_id is not null;
+
 create index if not exists buddy_inbox_messages_received_idx
   on public.buddy_inbox_messages (received_at desc);
 
