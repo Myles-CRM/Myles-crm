@@ -11,6 +11,7 @@ const BUDDY_INBOX_ALLOWED_TO = (process.env.BUDDY_INBOX_ALLOWED_TO || '')
   .filter(Boolean);
 
 function jsonResponse(res, status, body) {
+  res.setHeader?.('Cache-Control', 'no-store');
   return res.status(status).json(body);
 }
 
@@ -28,17 +29,27 @@ function headerValue(headers, name) {
   return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || '';
 }
 
+const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
+
 function rawBody(req) {
   if (typeof req.rawBody === 'string') return req.rawBody;
   if (Buffer.isBuffer(req.rawBody)) return req.rawBody.toString('utf8');
   if (typeof req.body === 'string') return req.body;
-  return JSON.stringify(req.body || {});
+  return null;
 }
 
 async function readRawBody(req) {
-  if (req.readableEnded || typeof req.on !== 'function') return rawBody(req);
+  const existing = rawBody(req);
+  if (existing !== null) return existing;
+  if (req.readableEnded || typeof req.on !== 'function') return null;
   const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_WEBHOOK_BYTES) throw new RangeError('Webhook payload too large');
+    chunks.push(buffer);
+  }
   return Buffer.concat(chunks).toString('utf8');
 }
 
@@ -126,7 +137,7 @@ function normalisePayload(payload = {}, receivedEmail = null) {
   return {
     provider: 'resend',
     event_type: payload.type || payload.event || 'email.received',
-    email_id: firstValue(data.email_id, data.id, data.message_id, payload.id),
+    email_id: firstValue(data.email_id),
     message_id: firstValue(data.message_id, data.headers?.['message-id']),
     from_email: emailFrom(data.from || data.sender || data.headers?.from),
     to_emails: toEmails,
@@ -177,10 +188,14 @@ export default async function handler(req, res) {
     return jsonResponse(res, 503, { ok: false, skipped: true, reason: `Missing ${status.missing.join(', ')}` });
   }
 
-  const payloadText = await readRawBody(req);
-  if (Buffer.byteLength(payloadText, 'utf8') > 2 * 1024 * 1024) {
-    return jsonResponse(res, 413, { ok: false, error: 'Webhook payload too large' });
+  let payloadText;
+  try {
+    payloadText = await readRawBody(req);
+  } catch (error) {
+    if (error instanceof RangeError) return jsonResponse(res, 413, { ok: false, error: 'Webhook payload too large' });
+    return jsonResponse(res, 400, { ok: false, error: 'Raw webhook body unavailable' });
   }
+  if (payloadText === null) return jsonResponse(res, 400, { ok: false, error: 'Raw webhook body unavailable' });
 
   let payload;
   try {
@@ -193,16 +208,21 @@ export default async function handler(req, res) {
     return jsonResponse(res, 401, { ok: false, error: 'Invalid Resend webhook signature' });
   }
 
+  if (payload.type !== 'email.received' || !payload.data || typeof payload.data.email_id !== 'string' || !payload.data.email_id.trim()) {
+    return jsonResponse(res, 400, { ok: false, error: 'Expected email.received with data.email_id' });
+  }
+
   let message = normalisePayload(payload);
-  if (message.event_type !== 'email.received') {
-    return jsonResponse(res, 202, { ok: true, skipped: true, reason: 'Event is not an inbound email' });
+  if (!allowedRecipient(message)) {
+    return jsonResponse(res, 202, { ok: true, skipped: true, reason: 'Recipient not allowed for Buddy Inbox' });
   }
   if (message.email_id) {
     try {
       const receivedEmail = await fetchReceivedEmail(message.email_id);
       message = normalisePayload(payload, receivedEmail);
     } catch (error) {
-      return jsonResponse(res, 502, { ok: false, error: error.message || 'Could not fetch received email body' });
+      console.error('Resend receiving API fetch failed', error);
+      return jsonResponse(res, 502, { ok: false, error: 'Could not fetch received email body' });
     }
   }
 
@@ -221,7 +241,8 @@ export default async function handler(req, res) {
     if (error.code === '23505' && message.email_id) {
       return jsonResponse(res, 200, { ok: true, duplicate: true, emailId: message.email_id });
     }
-    return jsonResponse(res, 500, { ok: false, error: error.message || 'Could not save Buddy Inbox message' });
+    console.error('Buddy Inbox storage failed', error);
+    return jsonResponse(res, 500, { ok: false, error: 'Could not save Buddy Inbox message' });
   }
 
   return jsonResponse(res, 200, { ok: true, saved: data });

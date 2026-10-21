@@ -44,6 +44,18 @@
         </div>
       </section>
 
+      <section class="card" aria-labelledby="messages-title">
+        <p class="eyebrow">Private CRM view</p>
+        <h2 id="messages-title">Inbox messages</h2>
+        <p class="hint">Enter the CRM admin passcode to load saved messages. The passcode is sent only to the authenticated CRM API.</p>
+        <div class="row">
+          <input id="inboxPasscode" type="password" placeholder="CRM admin passcode" autocomplete="current-password" aria-label="CRM admin passcode" />
+          <button id="loadInbox" type="button">Load messages</button>
+        </div>
+        <p id="inboxStatus" class="hint" role="status"></p>
+        <div id="inboxMessages" class="setup-list" aria-live="polite"></div>
+      </section>
+
       <section class="grid inbox-grid">
         <article class="card">
           <p class="eyebrow">How it will work</p>
@@ -126,6 +138,56 @@
       <small>Buddy Inbox is connected for selected forwarded emails. Keep secrets private.</small>
     </footer>
 
+    <script>
+      const inboxPasscode = document.getElementById('inboxPasscode');
+      const inboxStatus = document.getElementById('inboxStatus');
+      const inboxMessages = document.getElementById('inboxMessages');
+      const savedPasscode = localStorage.getItem('crm_admin_passcode') || '';
+      inboxPasscode.value = savedPasscode;
+
+      function escapeInboxText(value) {
+        return String(value || '').replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[character]));
+      }
+
+      function renderInboxMessages(messages) {
+        if (!messages.length) {
+          inboxMessages.innerHTML = '<p class="hint">No inbox messages yet.</p>';
+          return;
+        }
+        inboxMessages.innerHTML = messages.map((message) => {
+          const date = message.receivedAt ? new Date(message.receivedAt).toLocaleString('en-AU') : 'Unknown time';
+          return '<article class="card"><strong>' + escapeInboxText(message.subject) + '</strong>'
+            + '<p>' + escapeInboxText(message.fromEmail) + ' · ' + escapeInboxText(date) + '</p>'
+            + '<p>' + escapeInboxText(message.summary) + '</p>'
+            + '<small>Status: ' + escapeInboxText(message.status) + '</small></article>';
+        }).join('');
+      }
+
+      document.getElementById('loadInbox').addEventListener('click', async () => {
+        const passcode = inboxPasscode.value.trim();
+        if (!passcode) {
+          inboxStatus.textContent = 'Enter the CRM admin passcode first.';
+          return;
+        }
+        localStorage.setItem('crm_admin_passcode', passcode);
+        inboxStatus.textContent = 'Loading...';
+        inboxMessages.innerHTML = '';
+        try {
+          const response = await fetch('/api/buddy-inbox-list?limit=25', {
+            headers: { Authorization: 'Bearer ' + passcode }
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Could not load inbox');
+          renderInboxMessages(result.messages || []);
+          inboxStatus.textContent = result.messages.length + ' message(s) loaded.';
+        } catch (error) {
+          inboxStatus.textContent = 'Could not load inbox: ' + error.message;
+          inboxMessages.innerHTML = '';
+        }
+      });
+    </script>
     <script src="assets/common.js"></script>
   </body>
 </html>
