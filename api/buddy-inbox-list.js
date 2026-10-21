@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
   const { data, error } = await supabase
     .from('buddy_inbox_messages')
-    .select('id, subject, from_email, to_emails, received_at, summary, text_body, html_body, attachment_count, status')
+    .select('id, subject, from_email, to_emails, received_at, summary, attachment_count, status')
     .in('status', ['new', 'ready', 'metadata-only', 'reviewed'])
     .order('received_at', { ascending: false })
     .limit(limit);

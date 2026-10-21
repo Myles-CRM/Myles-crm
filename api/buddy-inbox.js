@@ -32,10 +32,17 @@ function headerValue(headers, name) {
 const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
 
 function rawBody(req) {
-  if (typeof req.rawBody === 'string') return req.rawBody;
-  if (Buffer.isBuffer(req.rawBody)) return req.rawBody.toString('utf8');
-  if (typeof req.body === 'string') return req.body;
-  return null;
+  const value = typeof req.rawBody === 'string'
+    ? req.rawBody
+    : Buffer.isBuffer(req.rawBody)
+      ? req.rawBody.toString('utf8')
+      : typeof req.body === 'string'
+        ? req.body
+        : null;
+  if (value !== null && Buffer.byteLength(value, 'utf8') > MAX_WEBHOOK_BYTES) {
+    throw new RangeError('Webhook payload too large');
+  }
+  return value;
 }
 
 async function readRawBody(req) {
