@@ -132,13 +132,15 @@
         checklist.innerHTML = '';
         if (!currentModel.items.length) { const empty = document.createElement('p'); empty.className = 'checklist-empty'; empty.textContent = 'Nothing here yet. Add your first task below.'; checklist.appendChild(empty); return; }
         currentModel.items.forEach(function(item) {
-          const row = document.createElement('label'); row.className = 'checklist-item' + (item.done ? ' done' : '');
+          const row = document.createElement('div'); row.className = 'checklist-item' + (item.done ? ' done' : '');
+          const main = document.createElement('label'); main.className = 'checklist-item-main';
           const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = item.done;
           checkbox.addEventListener('change', async function() { if (!isLoaded) return; item.done = checkbox.checked; renderChecklist(); await persistChecklist(); });
           const text = document.createElement('span'); text.className = 'checklist-item-text'; text.textContent = item.text;
+          main.append(checkbox, text);
           const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'checklist-delete'; remove.textContent = 'Remove'; remove.setAttribute('aria-label', 'Remove ' + item.text);
-          remove.addEventListener('click', async function(event) { event.preventDefault(); if (!isLoaded) return; currentModel.items = currentModel.items.filter(function(candidate) { return candidate.id !== item.id; }); renderChecklist(); await persistChecklist(); });
-          row.append(checkbox, text, remove); checklist.appendChild(row);
+          remove.addEventListener('click', async function(event) { event.preventDefault(); event.stopPropagation(); if (!isLoaded) return; currentModel.items = currentModel.items.filter(function(candidate) { return candidate.id !== item.id; }); renderChecklist(); await persistChecklist(); });
+          row.append(main, remove); checklist.appendChild(row);
         });
       }
       async function saveChecklistSnapshot(tab, snapshot) {
