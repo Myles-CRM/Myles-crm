@@ -44,8 +44,8 @@
 
           <div id="checklist" class="checklist" aria-live="polite"></div>
           <form id="addChecklistForm" class="checklist-add-form">
-            <input id="newChecklistItem" type="text" placeholder="Add something to do…" autocomplete="off" />
-            <button type="submit">Add task</button>
+            <input id="newChecklistItem" type="text" placeholder="New reminder… Press Enter to add" autocomplete="off" aria-label="New reminder" />
+            <button type="submit" class="checklist-add-submit">Add task</button>
           </form>
 
           <div class="notes-status-row">
@@ -136,7 +136,7 @@
           const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = item.done;
           checkbox.addEventListener('change', async function() { if (!isLoaded) return; item.done = checkbox.checked; renderChecklist(); await persistChecklist(); });
           const text = document.createElement('span'); text.className = 'checklist-item-text'; text.textContent = item.text;
-          const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'checklist-delete'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove ' + item.text);
+          const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'checklist-delete'; remove.textContent = 'Remove'; remove.setAttribute('aria-label', 'Remove ' + item.text);
           remove.addEventListener('click', async function(event) { event.preventDefault(); if (!isLoaded) return; currentModel.items = currentModel.items.filter(function(candidate) { return candidate.id !== item.id; }); renderChecklist(); await persistChecklist(); });
           row.append(checkbox, text, remove); checklist.appendChild(row);
         });

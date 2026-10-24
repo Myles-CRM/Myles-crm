@@ -194,6 +194,28 @@ footer { padding:16px; color:var(--muted); text-align:center; }
   .notes-status-row { align-items:flex-start; flex-direction:column; }
 }
 
+/* Cleaner Apple Reminders-style checklist controls */
+.notes-shell { border-radius:24px; box-shadow:0 24px 70px rgba(0, 0, 0, 0.24); }
+.notes-sidebar { background:rgba(22, 27, 34, 0.62); }
+.notes-category { transition:background .18s ease, transform .18s ease; }
+.notes-category:hover { transform:translateX(2px); }
+.notes-category.active { background:rgba(90, 200, 250, 0.12); }
+.notes-editor-panel { background:#0b0f14; }
+.notes-editor-header { padding:26px 28px 20px; background:rgba(22, 27, 34, 0.48); }
+.notes-editor-header h2 { font-size:30px; }
+.checklist { padding:8px 28px 20px; gap:0; }
+.checklist-item { border:0; border-bottom:1px solid rgba(154, 167, 178, 0.16); border-radius:0; background:transparent; padding:15px 4px; }
+.checklist-item:last-child { border-bottom:0; }
+.checklist-item input { width:22px; height:22px; }
+.checklist-item-text { font-size:16px; }
+.checklist-delete { opacity:0; margin-left:8px; padding:5px 7px; border-radius:8px; color:var(--muted); font-size:12px; transition:opacity .18s ease, color .18s ease, background .18s ease; }
+.checklist-item:hover .checklist-delete, .checklist-item:focus-within .checklist-delete { opacity:1; }
+.checklist-delete:hover, .checklist-delete:focus-visible { color:#ff7b72; background:rgba(255, 123, 114, 0.12); }
+.checklist-add-form { padding:8px 28px 24px; }
+.checklist-add-form input { border-radius:14px; background:rgba(22, 27, 34, 0.82); }
+.checklist-add-submit { display:none; }
+
+
 /* Contact multi-entry fields */
 .multi-entry-card { background:#0b0f14; border:1px solid var(--border); border-radius:18px; padding:12px; }
 .multi-entry-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
