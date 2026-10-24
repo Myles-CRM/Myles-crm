@@ -164,6 +164,15 @@ footer { padding:16px; color:var(--muted); text-align:center; }
 .notes-editor-header .hint { margin-top:4px; }
 .notes-editor { flex:1; width:100%; min-height:440px; resize:vertical; border:0; border-radius:0; background:transparent; padding:26px; font:18px/1.6 ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:var(--fg); outline:none; }
 .notes-editor::placeholder { color:rgba(154, 167, 178, 0.72); }
+.checklist { flex:1; min-height:440px; padding:26px; display:flex; flex-direction:column; gap:10px; overflow:auto; }
+.checklist-empty { color:var(--muted); padding:22px 4px; }
+.checklist-item { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:14px; background:rgba(22, 27, 34, 0.72); }
+.checklist-item input { width:20px; height:20px; accent-color:var(--accent); flex:none; }
+.checklist-item-text { flex:1; min-width:0; overflow-wrap:anywhere; }
+.checklist-item.done .checklist-item-text { color:var(--muted); text-decoration:line-through; }
+.checklist-delete { padding:4px 8px; color:var(--muted); background:transparent; border:0; }
+.checklist-add-form { display:flex; gap:10px; padding:0 26px 22px; }
+.checklist-add-form input { flex:1; min-width:0; }
 .notes-status-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 22px; border-top:1px solid var(--border); color:var(--muted); background:rgba(22, 27, 34, 0.72); }
 #status { color:var(--fg); font-weight:700; }
 .hidden { display:none !important; }
@@ -180,7 +189,8 @@ footer { padding:16px; color:var(--muted); text-align:center; }
 
 @media (max-width: 620px) {
   .notes-category-list { grid-template-columns:1fr; }
-  .notes-editor { min-height:360px; padding:18px; font-size:16px; }
+  .checklist { min-height:360px; padding:18px; }
+  .checklist-add-form { padding:0 18px 18px; }
   .notes-status-row { align-items:flex-start; flex-direction:column; }
 }
 
