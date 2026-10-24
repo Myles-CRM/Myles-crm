@@ -96,10 +96,10 @@ exports.handler = async (event) => {
 
     if (action === 'add-contact') {
       const { first_name, last_name, phone, address, email, profession, notes, created_by = 'Buddy' } = body;
-      if (!first_name || !last_name) return bad(400, 'first_name and last_name required');
+      if (!first_name) return bad(400, 'first_name required');
       const { data, error } = await supabase
         .from('contacts')
-        .insert([{ first_name, last_name, phone, address, email, profession, notes, created_by }])
+        .insert([{ first_name, last_name: last_name || null, phone, address, email, profession, notes, created_by }])
         .select()
         .single();
       if (error) return bad(500, error.message);

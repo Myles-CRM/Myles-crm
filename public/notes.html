@@ -42,11 +42,15 @@
             <button id="saveNotes" type="button">Save Notes</button>
           </div>
 
-          <textarea id="notesArea" class="notes-editor" rows="18" placeholder="• Write your notes here…"></textarea>
+          <div id="checklist" class="checklist" aria-live="polite"></div>
+          <form id="addChecklistForm" class="checklist-add-form">
+            <input id="newChecklistItem" type="text" placeholder="Add something to do…" autocomplete="off" />
+            <button type="submit">Add task</button>
+          </form>
 
           <div class="notes-status-row">
             <span id="status" role="status">Loading…</span>
-            <span class="hint">Cloud saves when available, with a saved copy on this device.</span>
+            <span class="hint">Ticks reset at midnight; unfinished tasks stay on the checklist for tomorrow.</span>
           </div>
         </section>
       </section>
@@ -73,15 +77,16 @@
         { id: 'homework', name: 'Homework', icon: '📚', hint: 'School tasks, study ideas, and things to remember.' },
         { id: 'guitar', name: 'Guitar', icon: '🎸', hint: 'Riffs, chords, practice plans, and reminders.' },
         { id: 'trumpet', name: 'Trumpet', icon: '🎺', hint: 'Lesson notes, scales, songs, and practice goals.' },
-        { id: 'bass', name: 'Bass Guitar', icon: '🎵', hint: 'Bass lines, rhythm ideas, and practice notes.' },
+        { id: 'bass', name: 'Bass Guitar', icon: '🎵', hint: 'Bass lines, rhythm ideas, and practice goals.' },
         { id: 'double-bass', name: 'Double Bass', icon: '🎻', hint: 'Double bass practice, pieces, and lesson notes.' },
         { id: 'drums', name: 'Drums', icon: '🥁', hint: 'Grooves, fills, tempos, and practice routines.' },
         { id: 'piano', name: 'Piano', icon: '🎹', hint: 'Pieces, chords, theory, and warmups.' },
         { id: 'general', name: 'General', icon: '📝', hint: 'Anything else you want to remember.' },
       ];
-
       const notesTabs = document.getElementById('notesTabs');
-      const notesArea = document.getElementById('notesArea');
+      const checklist = document.getElementById('checklist');
+      const addChecklistForm = document.getElementById('addChecklistForm');
+      const newChecklistItem = document.getElementById('newChecklistItem');
       const statusEl = document.getElementById('status');
       const saveNotesButton = document.getElementById('saveNotes');
       const categoryTitle = document.getElementById('categoryTitle');
@@ -89,183 +94,96 @@
       const categoryHint = document.getElementById('categoryHint');
       const notesCachePrefix = 'myles-crm-notes-cache-';
       let currentTab = 'homework';
+      let currentModel = { version: 1, day: '', items: [] };
       let isDirty = false;
+      let isLoaded = false;
+      let loadSequence = 0;
+      let persistQueue = Promise.resolve();
 
-      function getCategory(tab) {
-        return noteCategories.find((category) => category.id === tab) || noteCategories[0];
+      function getCategory(tab) { return noteCategories.find(function(category) { return category.id === tab; }) || noteCategories[0]; }
+      function setStatus(message) { statusEl.textContent = message; }
+      function dateKey() {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Adelaide', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map(function(part) { return [part.type, part.value]; }));
+        return parts.year + '-' + parts.month + '-' + parts.day;
       }
-
-      function loadCachedNotes(tab) {
-        return localStorage.getItem(`${notesCachePrefix}${tab}`) || '';
+      function newChecklist() { return { version: 1, day: dateKey(), items: [] }; }
+      function parseChecklist(content) {
+        content = content || '';
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed && Array.isArray(parsed.items)) return { version: 1, day: parsed.day || dateKey(), items: parsed.items.map(function(item) { return { id: item.id || crypto.randomUUID(), text: String(item.text || '').trim(), done: Boolean(item.done) }; }).filter(function(item) { return item.text; }) };
+        } catch (error) { /* Convert older plain-text notes below. */ }
+        return { version: 1, day: dateKey(), items: content.split(String.fromCharCode(10)).map(function(line) { return line.replace(/^\s*(?:•|-|\*)\s*/, '').trim(); }).filter(Boolean).map(function(text) { return { id: crypto.randomUUID(), text: text, done: false }; }) };
       }
-
-      function cacheNotes(tab, content) {
-        localStorage.setItem(`${notesCachePrefix}${tab}`, content);
-      }
-
-      function setStatus(message) {
-        statusEl.textContent = message;
-      }
-
-      function makeBulletNotes(content = '') {
-        if (!content.trim()) return '• ';
-        return content
-          .split('\n')
-          .map((line) => {
-            const trimmed = line.trim();
-            if (!trimmed) return '';
-            if (/^(•|-|\*)\s+/.test(trimmed)) return trimmed.replace(/^[-*]\s+/, '• ');
-            return `• ${trimmed}`;
-          })
-          .join('\n');
-      }
-
-      function insertAtCursor(text) {
-        const start = notesArea.selectionStart;
-        const end = notesArea.selectionEnd;
-        notesArea.value = `${notesArea.value.slice(0, start)}${text}${notesArea.value.slice(end)}`;
-        const position = start + text.length;
-        notesArea.selectionStart = position;
-        notesArea.selectionEnd = position;
-      }
-
+      function resetIfNewDay(model) { const today = dateKey(); if (model.day === today) return false; model.day = today; model.items.forEach(function(item) { item.done = false; }); return true; }
+      function cacheChecklist(tab, model) { localStorage.setItem(notesCachePrefix + tab, JSON.stringify(model)); }
+      function loadCachedChecklist(tab) { return parseChecklist(localStorage.getItem(notesCachePrefix + tab) || ''); }
+      function dirtyKey(tab) { return notesCachePrefix + 'dirty-' + tab; }
       function renderTabs() {
         notesTabs.innerHTML = '';
-        noteCategories.forEach((category) => {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'notes-category';
-          if (category.id === currentTab) button.classList.add('active');
-          button.dataset.tab = category.id;
-          button.innerHTML = `
-            <span class="notes-category-icon" aria-hidden="true">${category.icon}</span>
-            <span><strong>${category.name}</strong><small>${category.hint}</small></span>
-          `;
-          button.addEventListener('click', () => switchCategory(category.id));
-          notesTabs.appendChild(button);
+        noteCategories.forEach(function(category) {
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'notes-category' + (category.id === currentTab ? ' active' : '');
+          const icon = document.createElement('span'); icon.className = 'notes-category-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = category.icon;
+          const copy = document.createElement('span'); const strong = document.createElement('strong'); strong.textContent = category.name; const small = document.createElement('small'); small.textContent = category.hint; copy.append(strong, small); button.append(icon, copy);
+          button.addEventListener('click', function() { switchCategory(category.id); }); notesTabs.appendChild(button);
         });
       }
-
-      function updateCategoryHeader() {
-        const category = getCategory(currentTab);
-        categoryEyebrow.textContent = category.name;
-        categoryTitle.textContent = `${category.name} Notes`;
-        categoryHint.textContent = category.hint;
+      function renderChecklist() {
+        checklist.innerHTML = '';
+        if (!currentModel.items.length) { const empty = document.createElement('p'); empty.className = 'checklist-empty'; empty.textContent = 'Nothing here yet. Add your first task below.'; checklist.appendChild(empty); return; }
+        currentModel.items.forEach(function(item) {
+          const row = document.createElement('label'); row.className = 'checklist-item' + (item.done ? ' done' : '');
+          const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = item.done;
+          checkbox.addEventListener('change', async function() { if (!isLoaded) return; item.done = checkbox.checked; renderChecklist(); await persistChecklist(); });
+          const text = document.createElement('span'); text.className = 'checklist-item-text'; text.textContent = item.text;
+          const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'checklist-delete'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove ' + item.text);
+          remove.addEventListener('click', async function(event) { event.preventDefault(); if (!isLoaded) return; currentModel.items = currentModel.items.filter(function(candidate) { return candidate.id !== item.id; }); renderChecklist(); await persistChecklist(); });
+          row.append(checkbox, text, remove); checklist.appendChild(row);
+        });
       }
-
-      function showCachedNotes(tab, message) {
-        notesArea.value = makeBulletNotes(loadCachedNotes(tab));
-        isDirty = false;
-        setStatus(message);
-      }
-
-      async function loadCloud(tab) {
-        updateCategoryHeader();
-        renderTabs();
-        setStatus('Loading notes…');
-
-        if (!window.supabase) {
-          showCachedNotes(tab, 'Offline — showing the saved copy on this device.');
-          return;
-        }
-
-        const { data, error } = await window.supabase
-          .from('notes')
-          .select('*')
-          .eq('category', tab)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          console.warn('Could not load cloud notes', error);
-          showCachedNotes(tab, 'Offline — showing the saved copy on this device.');
-          return;
-        }
-
-        const latest = makeBulletNotes(data.length ? data[data.length - 1].content : '');
-        cacheNotes(tab, latest);
-        notesArea.value = latest;
-        isDirty = false;
-        setStatus(`Loaded ${getCategory(tab).name} notes.`);
-      }
-
-      async function saveCurrentNotes() {
-        const content = makeBulletNotes(notesArea.value);
-        notesArea.value = content;
-        cacheNotes(currentTab, content);
-        saveNotesButton.disabled = true;
-        setStatus('Saving notes…');
-
+      async function saveChecklistSnapshot(tab, snapshot) {
+        saveNotesButton.disabled = true; setStatus('Saving checklist…');
         try {
           if (!window.supabase) throw new Error('Cloud is not available.');
-          const { error } = await window.supabase
-            .from('notes')
-            .insert([{ category: currentTab, content, created_by: 'Myles' }]);
-          if (error) throw error;
-          isDirty = false;
-          setStatus('Saved to cloud and this device.');
-        } catch (error) {
-          console.warn('Could not save cloud notes', error);
-          isDirty = false;
-          setStatus('Saved on this device. Cloud saving was not available.');
-        } finally {
-          saveNotesButton.disabled = false;
-        }
+          const result = await window.supabase.from('notes').insert([{ category: tab, content: JSON.stringify(snapshot), created_by: 'Myles' }]);
+          if (result.error) throw result.error;
+          if (localStorage.getItem(dirtyKey(tab)) === JSON.stringify(snapshot)) localStorage.removeItem(dirtyKey(tab));
+          if (tab === currentTab) { isDirty = false; setStatus(snapshot.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved to cloud.'); }
+        } catch (error) { console.warn('Could not save cloud checklist', error); if (tab === currentTab) setStatus(snapshot.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved on this device; cloud retry pending.'); }
+        finally { saveNotesButton.disabled = false; }
       }
-
-      async function switchCategory(tab) {
-        if (tab === currentTab) return;
-        if (isDirty) await saveCurrentNotes();
-        currentTab = tab;
-        await loadCloud(currentTab);
+      function persistChecklist() {
+        const tab = currentTab;
+        const snapshot = JSON.parse(JSON.stringify(currentModel));
+        cacheChecklist(tab, snapshot);
+        localStorage.setItem(dirtyKey(tab), JSON.stringify(snapshot));
+        persistQueue = persistQueue.catch(function() {}).then(function() { return saveChecklistSnapshot(tab, snapshot); });
+        return persistQueue;
       }
-
-      notesArea.addEventListener('focus', () => {
-        if (!notesArea.value.trim()) {
-          notesArea.value = '• ';
-          notesArea.selectionStart = notesArea.value.length;
-          notesArea.selectionEnd = notesArea.value.length;
+      async function loadCloud(tab) {
+        const requestId = ++loadSequence;
+        isLoaded = false;
+        addChecklistForm.querySelector('input').disabled = true;
+        addChecklistForm.querySelector('button').disabled = true;
+        saveNotesButton.disabled = true;
+        const category = getCategory(tab); categoryEyebrow.textContent = category.name; categoryTitle.textContent = category.name + ' Checklist'; categoryHint.textContent = category.hint; renderTabs(); setStatus('Loading checklist…');
+        let model = loadCachedChecklist(tab);
+        const localDirty = Boolean(localStorage.getItem(dirtyKey(tab)));
+        if (window.supabase && !localDirty) {
+          const result = await window.supabase.from('notes').select('*').eq('category', tab).is('deleted_at', null).order('created_at', { ascending: true });
+          if (requestId !== loadSequence) return;
+          if (!result.error && result.data.length) model = parseChecklist(result.data[result.data.length - 1].content); else if (result.error) console.warn('Could not load cloud checklist', result.error);
         }
-      });
-
-      notesArea.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        const beforeCursor = notesArea.value.slice(0, notesArea.selectionStart);
-        const currentLine = beforeCursor.split('\n').pop() || '';
-        if (/^\s*•\s*$/.test(currentLine)) {
-          event.preventDefault();
-          const lineStart = beforeCursor.lastIndexOf('\n') + 1;
-          notesArea.value = `${notesArea.value.slice(0, lineStart)}${notesArea.value.slice(notesArea.selectionStart)}`;
-          notesArea.selectionStart = lineStart;
-          notesArea.selectionEnd = lineStart;
-          isDirty = true;
-          cacheNotes(currentTab, notesArea.value);
-          setStatus('Unsaved changes.');
-          return;
-        }
-        if (/^\s*•\s+/.test(currentLine) || !currentLine.trim()) {
-          event.preventDefault();
-          insertAtCursor('\n• ');
-          isDirty = true;
-          cacheNotes(currentTab, notesArea.value);
-          setStatus('Unsaved changes.');
-        }
-      });
-
-      notesArea.addEventListener('input', () => {
-        isDirty = true;
-        cacheNotes(currentTab, notesArea.value);
-        setStatus('Unsaved changes.');
-      });
-
-      notesArea.addEventListener('blur', () => {
-        notesArea.value = makeBulletNotes(notesArea.value);
-        cacheNotes(currentTab, notesArea.value);
-      });
-
-      saveNotesButton.addEventListener('click', saveCurrentNotes);
-      renderTabs();
-      loadCloud(currentTab);
+        if (requestId !== loadSequence) return;
+        const reset = resetIfNewDay(model); currentModel = model; cacheChecklist(tab, model); renderChecklist(); isDirty = reset; isLoaded = true; addChecklistForm.querySelector('input').disabled = false; addChecklistForm.querySelector('button').disabled = false; saveNotesButton.disabled = false;
+        setStatus(model.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do.' + (reset ? ' Ticks reset for today.' : (localDirty ? ' Local changes waiting to sync.' : '')));
+        if ((reset || localDirty) && window.supabase) await persistChecklist();
+      }
+      async function switchCategory(tab) { if (tab === currentTab) return; if (isDirty) await persistChecklist(); loadSequence += 1; currentTab = tab; await loadCloud(currentTab); }
+      addChecklistForm.addEventListener('submit', async function(event) { event.preventDefault(); if (!isLoaded) return; const text = newChecklistItem.value.trim(); if (!text) return; currentModel.items.push({ id: crypto.randomUUID(), text: text, done: false }); newChecklistItem.value = ''; isDirty = true; renderChecklist(); await persistChecklist(); newChecklistItem.focus(); });
+      saveNotesButton.addEventListener('click', persistChecklist);
+      renderTabs(); currentModel = newChecklist(); loadCloud(currentTab);
+      window.setInterval(async function() { if (!isLoaded) return; if (resetIfNewDay(currentModel)) { renderChecklist(); isDirty = true; await persistChecklist(); } }, 60000);
     </script>
     <!-- END: Notes cloud script -->
   </body>
