@@ -1,4 +1,4 @@
-const CACHE_NAME = 'myles-crm-offline-v6';
+const CACHE_NAME = 'myles-crm-offline-v7';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -33,6 +33,11 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const request = event.request;
+  if (new URL(request.url).pathname.endsWith('/runtime-config.js')) {
+    event.respondWith(fetch(new Request(request, { cache: 'no-store' })));
+    return;
+  }
+
   const acceptsHtml = request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html');
 
   if (acceptsHtml) {
