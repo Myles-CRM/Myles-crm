@@ -143,8 +143,8 @@
       const emailFields = document.getElementById('emailFields');
       const addressFields = document.getElementById('addressFields');
 
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
       const entryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
       let contacts = [];
       let selectedContactId = '';

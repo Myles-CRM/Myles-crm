@@ -87,12 +87,12 @@
       const contactSummary = document.getElementById('contactSummary');
       const homeworkSummary = document.getElementById('homeworkSummary');
 
-      const localEventsKey = 'myles-crm-calendar-events';
-      const calendarFeedsKey = 'myles-crm-calendar-feeds';
-      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
-      const homeworkCacheKey = 'myles-crm-notes-cache-homework';
+      const localEventsKey = window.CrmAuth.cacheKey('calendar-events');
+      const calendarFeedsKey = window.CrmAuth.cacheKey('calendar-feeds');
+      const cloudEventsCacheKey = window.CrmAuth.cacheKey('cloud-calendar');
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
+      const homeworkCacheKey = window.CrmAuth.cacheKey('notes-homework');
       const labelledEntryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
 

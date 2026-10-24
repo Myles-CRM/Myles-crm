@@ -93,7 +93,7 @@
       const categoryTitle = document.getElementById('categoryTitle');
       const categoryEyebrow = document.getElementById('categoryEyebrow');
       const categoryHint = document.getElementById('categoryHint');
-      const notesCachePrefix = 'myles-crm-notes-cache-';
+      const notesCachePrefix = window.CrmAuth.cacheKey('notes-');
       let currentTab = 'homework';
       let currentModel = { version: 1, day: '', items: [] };
       let isDirty = false;

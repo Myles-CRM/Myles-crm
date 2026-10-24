@@ -177,11 +177,11 @@
       const nextMonthButton = document.getElementById('nextMonth');
       const todayButton = document.getElementById('todayButton');
 
-      const localStorageKey = 'myles-crm-calendar-events';
-      const calendarFeedsKey = 'myles-crm-calendar-feeds';
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const localStorageKey = window.CrmAuth.cacheKey('calendar-events');
+      const calendarFeedsKey = window.CrmAuth.cacheKey('calendar-feeds');
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudEventsCacheKey = window.CrmAuth.cacheKey('cloud-calendar');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
       const importRefreshHour = 5;
       const reminderEmailAddress = 'tacotrumpet001@gmail.com';
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });

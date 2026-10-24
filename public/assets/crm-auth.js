@@ -66,12 +66,36 @@
     window.location.replace(returnPage(next));
   }
 
+  function cacheKey(name) {
+    const uid = typeof window.CRM_OWNER_UID === 'string' && uuidPattern.test(window.CRM_OWNER_UID)
+      ? window.CRM_OWNER_UID.toLowerCase()
+      : 'unconfigured';
+    return 'myles-crm:' + uid + ':' + String(name);
+  }
+
+  function clearPrivateCaches() {
+    for (const key of Object.keys(window.localStorage || {})) {
+      if (key.startsWith('myles-crm:') || key.startsWith('myles-crm-') || key === 'crm_admin_passcode') window.localStorage.removeItem(key);
+    }
+  }
+
   async function signOut() {
+    clearPrivateCaches();
     const { error } = await client().auth.signOut();
     if (error) throw error;
-    // Integrating pages must clear their own private local caches before redirecting.
     window.location.replace('login.html');
   }
 
-  window.CrmAuth = Object.freeze({ returnPage, verifiedOwner, requireOwner, sendMagicLink, finishMagicLink, signOut });
+  function installAuthWatch() {
+    if (typeof window.supabase?.auth?.onAuthStateChange !== 'function') return;
+    let lastUserId = '';
+    window.supabase.auth.onAuthStateChange((event, session) => {
+      const nextUserId = session?.user?.id ? String(session.user.id).toLowerCase() : '';
+      if (event === 'SIGNED_OUT' || (lastUserId && nextUserId && nextUserId !== lastUserId)) clearPrivateCaches();
+      lastUserId = nextUserId;
+    });
+  }
+
+  window.CrmAuth = Object.freeze({ returnPage, verifiedOwner, requireOwner, sendMagicLink, finishMagicLink, cacheKey, clearPrivateCaches, signOut, installAuthWatch });
+  installAuthWatch();
 })();
