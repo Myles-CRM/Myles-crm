@@ -1,15 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const BUDDY_INBOX_WEBHOOK_TOKEN = process.env.BUDDY_INBOX_WEBHOOK_TOKEN;
+const RESEND_WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET;
 const BUDDY_INBOX_ALLOWED_TO = (process.env.BUDDY_INBOX_ALLOWED_TO || '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
 
 function jsonResponse(res, status, body) {
+  res.setHeader?.('Cache-Control', 'no-store');
   return res.status(status).json(body);
 }
 
@@ -18,7 +20,8 @@ function configStatus() {
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
   if (!RESEND_API_KEY) missing.push('RESEND_API_KEY');
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) missing.push('BUDDY_INBOX_WEBHOOK_TOKEN');
+  if (!RESEND_WEBHOOK_SECRET) missing.push('RESEND_WEBHOOK_SECRET');
+  if (!BUDDY_INBOX_ALLOWED_TO.length) missing.push('BUDDY_INBOX_ALLOWED_TO');
   return { ready: missing.length === 0, missing };
 }
 
@@ -26,15 +29,57 @@ function headerValue(headers, name) {
   return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || '';
 }
 
-function requestToken(req) {
-  const auth = headerValue(req.headers, 'authorization');
-  if (auth.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
-  return headerValue(req.headers, 'x-buddy-inbox-token') || req.query?.token || '';
+const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
+
+function rawBody(req) {
+  const value = typeof req.rawBody === 'string'
+    ? req.rawBody
+    : Buffer.isBuffer(req.rawBody)
+      ? req.rawBody.toString('utf8')
+      : typeof req.body === 'string'
+        ? req.body
+        : null;
+  if (value !== null && Buffer.byteLength(value, 'utf8') > MAX_WEBHOOK_BYTES) {
+    throw new RangeError('Webhook payload too large');
+  }
+  return value;
 }
 
-function isAuthorized(req) {
-  if (!BUDDY_INBOX_WEBHOOK_TOKEN) return false;
-  return requestToken(req) === BUDDY_INBOX_WEBHOOK_TOKEN;
+async function readRawBody(req) {
+  const existing = rawBody(req);
+  if (existing !== null) return existing;
+  if (req.readableEnded || typeof req.on !== 'function') return null;
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_WEBHOOK_BYTES) throw new RangeError('Webhook payload too large');
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function verifyResendWebhook(payload, headers) {
+  const id = headerValue(headers, 'svix-id');
+  const timestamp = headerValue(headers, 'svix-timestamp');
+  const signature = headerValue(headers, 'svix-signature');
+  if (!id || !timestamp || !signature || !RESEND_WEBHOOK_SECRET) return false;
+
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() / 1000 - timestampNumber) > 300) return false;
+
+  const secretValue = RESEND_WEBHOOK_SECRET.startsWith('whsec_')
+    ? RESEND_WEBHOOK_SECRET.slice('whsec_'.length)
+    : RESEND_WEBHOOK_SECRET;
+  const secret = Buffer.from(secretValue, 'base64');
+  const expected = createHmac('sha256', secret).update(id + '.' + timestamp + '.' + payload).digest('base64');
+  return signature.split(' ').some((candidate) => {
+    const value = candidate.startsWith('v1,') ? candidate.slice(3) : '';
+    const actual = Buffer.from(value);
+    const wanted = Buffer.from(expected);
+    return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+  });
 }
 
 function asArray(value) {
@@ -75,7 +120,7 @@ async function fetchReceivedEmail(emailId) {
   const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
     headers: {
       Accept: 'application/json',
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: 'Bearer ' + RESEND_API_KEY,
     },
   });
 
@@ -99,7 +144,7 @@ function normalisePayload(payload = {}, receivedEmail = null) {
   return {
     provider: 'resend',
     event_type: payload.type || payload.event || 'email.received',
-    email_id: firstValue(data.email_id, data.id, data.message_id, payload.id),
+    email_id: firstValue(data.email_id),
     message_id: firstValue(data.message_id, data.headers?.['message-id']),
     from_email: emailFrom(data.from || data.sender || data.headers?.from),
     to_emails: toEmails,
@@ -123,6 +168,8 @@ function allowedRecipient(message) {
     .map((email) => email.toLowerCase());
   return recipients.some((email) => BUDDY_INBOX_ALLOWED_TO.includes(email));
 }
+
+export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
@@ -148,17 +195,41 @@ export default async function handler(req, res) {
     return jsonResponse(res, 503, { ok: false, skipped: true, reason: `Missing ${status.missing.join(', ')}` });
   }
 
-  if (!isAuthorized(req)) {
-    return jsonResponse(res, 401, { ok: false, error: 'Unauthorized' });
+  let payloadText;
+  try {
+    payloadText = await readRawBody(req);
+  } catch (error) {
+    if (error instanceof RangeError) return jsonResponse(res, 413, { ok: false, error: 'Webhook payload too large' });
+    return jsonResponse(res, 400, { ok: false, error: 'Raw webhook body unavailable' });
+  }
+  if (payloadText === null) return jsonResponse(res, 400, { ok: false, error: 'Raw webhook body unavailable' });
+
+  let payload;
+  try {
+    payload = JSON.parse(payloadText || '{}');
+  } catch {
+    return jsonResponse(res, 400, { ok: false, error: 'Invalid JSON payload' });
   }
 
-  let message = normalisePayload(req.body || {});
-  if (message.event_type === 'email.received' && message.email_id) {
+  if (!verifyResendWebhook(payloadText, req.headers || {})) {
+    return jsonResponse(res, 401, { ok: false, error: 'Invalid Resend webhook signature' });
+  }
+
+  if (payload.type !== 'email.received' || !payload.data || typeof payload.data.email_id !== 'string' || !payload.data.email_id.trim()) {
+    return jsonResponse(res, 400, { ok: false, error: 'Expected email.received with data.email_id' });
+  }
+
+  let message = normalisePayload(payload);
+  if (!allowedRecipient(message)) {
+    return jsonResponse(res, 202, { ok: true, skipped: true, reason: 'Recipient not allowed for Buddy Inbox' });
+  }
+  if (message.email_id) {
     try {
       const receivedEmail = await fetchReceivedEmail(message.email_id);
-      message = normalisePayload(req.body || {}, receivedEmail);
+      message = normalisePayload(payload, receivedEmail);
     } catch (error) {
-      return jsonResponse(res, 502, { ok: false, error: error.message || 'Could not fetch received email body' });
+      console.error('Resend receiving API fetch failed', error);
+      return jsonResponse(res, 502, { ok: false, error: 'Could not fetch received email body' });
     }
   }
 
@@ -174,7 +245,11 @@ export default async function handler(req, res) {
     .single();
 
   if (error) {
-    return jsonResponse(res, 500, { ok: false, error: error.message || 'Could not save Buddy Inbox message' });
+    if (error.code === '23505' && message.email_id) {
+      return jsonResponse(res, 200, { ok: true, duplicate: true, emailId: message.email_id });
+    }
+    console.error('Buddy Inbox storage failed', error);
+    return jsonResponse(res, 500, { ok: false, error: 'Could not save Buddy Inbox message' });
   }
 
   return jsonResponse(res, 200, { ok: true, saved: data });

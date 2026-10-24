@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { tokenMatches } from '../lib/auth.js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -17,7 +18,7 @@ export default async function handler(req, res) {
 
   const auth = (req.headers.authorization || '').toString();
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!CRM_ADMIN_TOKEN || token !== CRM_ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!tokenMatches(CRM_ADMIN_TOKEN, token)) return res.status(401).json({ error: 'Unauthorized' });
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'Server not configured' });
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
