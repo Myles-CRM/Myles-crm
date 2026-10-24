@@ -96,10 +96,15 @@
       let currentTab = 'homework';
       let currentModel = { version: 1, day: '', items: [] };
       let isDirty = false;
+      let loadSequence = 0;
+      let persistQueue = Promise.resolve();
 
       function getCategory(tab) { return noteCategories.find(function(category) { return category.id === tab; }) || noteCategories[0]; }
       function setStatus(message) { statusEl.textContent = message; }
-      function dateKey() { const now = new Date(); return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'); }
+      function dateKey() {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Adelaide', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map(function(part) { return [part.type, part.value]; }));
+        return parts.year + '-' + parts.month + '-' + parts.day;
+      }
       function newChecklist() { return { version: 1, day: dateKey(), items: [] }; }
       function parseChecklist(content) {
         content = content || '';
@@ -112,6 +117,7 @@
       function resetIfNewDay(model) { const today = dateKey(); if (model.day === today) return false; model.day = today; model.items.forEach(function(item) { item.done = false; }); return true; }
       function cacheChecklist(tab, model) { localStorage.setItem(notesCachePrefix + tab, JSON.stringify(model)); }
       function loadCachedChecklist(tab) { return parseChecklist(localStorage.getItem(notesCachePrefix + tab) || ''); }
+      function dirtyKey(tab) { return notesCachePrefix + 'dirty-' + tab; }
       function renderTabs() {
         notesTabs.innerHTML = '';
         noteCategories.forEach(function(category) {
@@ -134,33 +140,45 @@
           row.append(checkbox, text, remove); checklist.appendChild(row);
         });
       }
-      async function persistChecklist() {
-        cacheChecklist(currentTab, currentModel); saveNotesButton.disabled = true; setStatus('Saving checklist…');
+      async function saveChecklistSnapshot(tab, snapshot) {
+        saveNotesButton.disabled = true; setStatus('Saving checklist…');
         try {
           if (!window.supabase) throw new Error('Cloud is not available.');
-          const result = await window.supabase.from('notes').insert([{ category: currentTab, content: JSON.stringify(currentModel), created_by: 'Myles' }]);
+          const result = await window.supabase.from('notes').insert([{ category: tab, content: JSON.stringify(snapshot), created_by: 'Myles' }]);
           if (result.error) throw result.error;
-          isDirty = false; setStatus(currentModel.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved to cloud.');
-        } catch (error) { console.warn('Could not save cloud checklist', error); isDirty = false; setStatus(currentModel.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved on this device.'); }
+          localStorage.removeItem(dirtyKey(tab));
+          if (tab === currentTab) { isDirty = false; setStatus(snapshot.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved to cloud.'); }
+        } catch (error) { console.warn('Could not save cloud checklist', error); if (tab === currentTab) setStatus(snapshot.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved on this device; cloud retry pending.'); }
         finally { saveNotesButton.disabled = false; }
       }
+      function persistChecklist() {
+        const tab = currentTab;
+        const snapshot = JSON.parse(JSON.stringify(currentModel));
+        cacheChecklist(tab, snapshot);
+        localStorage.setItem(dirtyKey(tab), '1');
+        persistQueue = persistQueue.catch(function() {}).then(function() { return saveChecklistSnapshot(tab, snapshot); });
+        return persistQueue;
+      }
       async function loadCloud(tab) {
+        const requestId = ++loadSequence;
         const category = getCategory(tab); categoryEyebrow.textContent = category.name; categoryTitle.textContent = category.name + ' Checklist'; categoryHint.textContent = category.hint; renderTabs(); setStatus('Loading checklist…');
         let model = loadCachedChecklist(tab);
-        if (window.supabase) {
+        const localDirty = localStorage.getItem(dirtyKey(tab)) === '1';
+        if (window.supabase && !localDirty) {
           const result = await window.supabase.from('notes').select('*').eq('category', tab).is('deleted_at', null).order('created_at', { ascending: true });
+          if (requestId !== loadSequence) return;
           if (!result.error && result.data.length) model = parseChecklist(result.data[result.data.length - 1].content); else if (result.error) console.warn('Could not load cloud checklist', result.error);
         }
+        if (requestId !== loadSequence) return;
         const reset = resetIfNewDay(model); currentModel = model; cacheChecklist(tab, model); renderChecklist(); isDirty = reset;
-        setStatus(model.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do.' + (reset ? ' Ticks reset for today.' : ''));
-        if (reset && window.supabase) await persistChecklist();
+        setStatus(model.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do.' + (reset ? ' Ticks reset for today.' : (localDirty ? ' Local changes waiting to sync.' : '')));
+        if ((reset || localDirty) && window.supabase) await persistChecklist();
       }
-      async function switchCategory(tab) { if (tab === currentTab) return; if (isDirty) await persistChecklist(); currentTab = tab; await loadCloud(currentTab); }
+      async function switchCategory(tab) { if (tab === currentTab) return; if (isDirty) await persistChecklist(); loadSequence += 1; currentTab = tab; await loadCloud(currentTab); }
       addChecklistForm.addEventListener('submit', async function(event) { event.preventDefault(); const text = newChecklistItem.value.trim(); if (!text) return; currentModel.items.push({ id: crypto.randomUUID(), text: text, done: false }); newChecklistItem.value = ''; isDirty = true; renderChecklist(); await persistChecklist(); newChecklistItem.focus(); });
       saveNotesButton.addEventListener('click', persistChecklist);
       renderTabs(); currentModel = newChecklist(); loadCloud(currentTab);
-      function scheduleMidnightReset() { const now = new Date(); const nextMidnight = new Date(now); nextMidnight.setHours(24, 0, 1, 0); window.setTimeout(async function() { if (resetIfNewDay(currentModel)) { renderChecklist(); isDirty = true; await persistChecklist(); } scheduleMidnightReset(); }, Math.max(1000, nextMidnight.getTime() - now.getTime())); }
-      scheduleMidnightReset();
+      window.setInterval(async function() { if (resetIfNewDay(currentModel)) { renderChecklist(); isDirty = true; await persistChecklist(); } }, 60000);
     </script>
     <!-- END: Notes cloud script -->
   </body>

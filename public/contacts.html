@@ -255,7 +255,7 @@
         return {
           id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
           first_name: contact.first_name || '',
-          last_name: contact.last_name || '',
+          last_name: contact.last_name || null,
           phone: serialisePhoneEntries(phones),
           phones,
           emails,
