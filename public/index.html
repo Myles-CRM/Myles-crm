@@ -77,6 +77,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Home dashboard script -->
     <script>
@@ -441,7 +442,7 @@
         }
       }
 
-      loadDashboard();
+      window.CrmAuth.requireOwner().then((user) => { if (user) loadDashboard(); });
     </script>
     <!-- END: Home dashboard script -->
   </body>

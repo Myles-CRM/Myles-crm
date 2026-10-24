@@ -70,6 +70,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Notes cloud script -->
     <script>
@@ -184,7 +185,12 @@
       async function switchCategory(tab) { if (tab === currentTab) return; if (isDirty) await persistChecklist(); loadSequence += 1; currentTab = tab; await loadCloud(currentTab); }
       addChecklistForm.addEventListener('submit', async function(event) { event.preventDefault(); if (!isLoaded) return; const text = newChecklistItem.value.trim(); if (!text) return; currentModel.items.push({ id: crypto.randomUUID(), text: text, done: false }); newChecklistItem.value = ''; isDirty = true; renderChecklist(); await persistChecklist(); newChecklistItem.focus(); });
       saveNotesButton.addEventListener('click', persistChecklist);
-      renderTabs(); currentModel = newChecklist(); loadCloud(currentTab);
+      window.CrmAuth.requireOwner().then((user) => {
+        if (!user) return;
+        renderTabs();
+        currentModel = newChecklist();
+        return loadCloud(currentTab);
+      });
       window.setInterval(async function() { if (!isLoaded) return; if (resetIfNewDay(currentModel)) { renderChecklist(); isDirty = true; await persistChecklist(); } }, 60000);
     </script>
     <!-- END: Notes cloud script -->

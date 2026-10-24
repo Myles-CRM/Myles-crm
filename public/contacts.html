@@ -123,6 +123,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Contacts cloud script -->
     <script>
@@ -718,8 +719,11 @@
       });
 
       search.addEventListener('input', renderContactList);
-      resetContactEditor();
-      refreshContacts();
+      window.CrmAuth.requireOwner().then((user) => {
+        if (!user) return;
+        resetContactEditor();
+        return refreshContacts();
+      });
     </script>
     <!-- END: Contacts cloud script -->
   </body>
