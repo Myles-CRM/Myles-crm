@@ -53,7 +53,7 @@
         <form id="contactForm" class="stacked-form">
           <div class="two-column-form">
             <input name="first_name" placeholder="First name" autocomplete="given-name" required />
-            <input name="last_name" placeholder="Last name" autocomplete="family-name" required />
+            <input name="last_name" placeholder="Last name (optional)" autocomplete="family-name" />
           </div>
           <div class="multi-entry-card" data-entry-type="phones">
             <div class="multi-entry-header">
@@ -255,7 +255,7 @@
         return {
           id: contact.id || `${source}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
           first_name: contact.first_name || '',
-          last_name: contact.last_name || '',
+          last_name: contact.last_name || null,
           phone: serialisePhoneEntries(phones),
           phones,
           emails,
@@ -644,8 +644,8 @@
         event.preventDefault();
         const contact = collectContactFromForm(editingContactSource || 'local', editingContactId || '');
 
-        if (!contact.first_name.trim() || !contact.last_name.trim()) {
-          formStatus.textContent = 'First and last name are needed.';
+        if (!contact.first_name.trim()) {
+          formStatus.textContent = 'A first name is needed.';
           return;
         }
 
