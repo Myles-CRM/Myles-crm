@@ -6,7 +6,7 @@ begin;
 
 create table if not exists public.contacts (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references auth.users(id),
+  owner_id uuid not null default auth.uid() references auth.users(id),
   first_name text not null check (length(btrim(first_name)) > 0),
   last_name text,
   phone text,
@@ -22,7 +22,7 @@ create table if not exists public.contacts (
 
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references auth.users(id),
+  owner_id uuid not null default auth.uid() references auth.users(id),
   title text not null check (length(btrim(title)) > 0),
   date date not null,
   time text,

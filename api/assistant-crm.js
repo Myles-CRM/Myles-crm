@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { tokenMatches } from '../lib/auth.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const CRM_ASSISTANT_TOKEN = process.env.CRM_ASSISTANT_TOKEN || '';
 const CRM_OWNER_UID = process.env.CRM_OWNER_UID || '';
@@ -24,16 +24,18 @@ function validUuid(value) {
 
 function text(value, max = 1000) {
   const result = String(value ?? '').trim();
-  return result.length > max ? result.slice(0, max) : result;
+  if (result.length > max) throw new Error('Input is too long');
+  return result;
 }
 
 function configured() {
-  let host = '';
-  try { host = new URL(SUPABASE_URL).hostname; } catch { return false; }
-  return host === ALLOWED_HOST && Boolean(SUPABASE_SERVICE_KEY) && validUuid(CRM_OWNER_UID);
+  let parsed;
+  try { parsed = new URL(SUPABASE_URL); } catch { return false; }
+  return parsed.href === 'https://' + ALLOWED_HOST + '/' && Boolean(SUPABASE_SERVICE_KEY) && validUuid(CRM_OWNER_UID);
 }
 
 function rowForAction(action, data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('data must be an object');
   if (action === 'add_contact') {
     const first_name = text(data?.first_name, 120);
     if (!first_name) throw new Error('first_name is required');
@@ -46,9 +48,9 @@ function rowForAction(action, data) {
     return { table: 'events', row: { owner_id: CRM_OWNER_UID, title, date, time: text(data.time, 30) || null, location: text(data.location, 500) || null, created_by: 'Buddy' } };
   }
   if (action === 'add_note') {
-    const category = text(data?.category, 80);
-    const content = text(data?.content, 50000);
-    if (!category || !content) throw new Error('category and content are required');
+    const category = text(data.category, 80);
+    const content = text(data.content, 50000);
+    if (!['homework', 'guitar', 'trumpet', 'bass', 'drums', 'piano', 'general'].includes(category) || !content) throw new Error('valid category and content are required');
     return { table: 'notes', row: { owner_id: CRM_OWNER_UID, category, content, created_by: 'Buddy' } };
   }
   return null;
@@ -64,9 +66,21 @@ export default async function handler(req, res) {
   const action = String(body.action || '');
   if (!ACTIONS.has(action)) return reply(res, 400, { ok: false, error: 'Unsupported action' });
 
+  let add;
+  let requestedLimit = 50;
+  try {
+    add = rowForAction(action, body.data);
+    if (!add) {
+      requestedLimit = body.limit === undefined ? 50 : Number(body.limit);
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) throw new Error('limit must be an integer from 1 to 100');
+      if (body.category !== undefined) text(body.category, 80);
+    }
+  } catch (error) {
+    return reply(res, 400, { ok: false, error: error.message });
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
   try {
-    const add = rowForAction(action, body.data);
     if (add) {
       const { data, error } = await supabase.from(add.table).insert(add.row).select('id').single();
       if (error) throw error;
@@ -75,8 +89,13 @@ export default async function handler(req, res) {
     }
 
     const table = action.endsWith('contacts') ? 'contacts' : action.endsWith('events') ? 'events' : 'notes';
-    const limit = Math.min(Math.max(Number(body.limit || 50), 1), 100);
-    let query = supabase.from(table).select('*').eq('owner_id', CRM_OWNER_UID).is('deleted_at', null).limit(limit);
+    const limit = requestedLimit;
+    const columns = table === 'contacts'
+      ? 'id, owner_id, first_name, last_name, phone, email, address, profession, notes, created_by, created_at, updated_at, deleted_at'
+      : table === 'events'
+        ? 'id, owner_id, title, date, time, location, created_by, created_at, updated_at, deleted_at'
+        : 'id, owner_id, category, content, created_by, created_at, deleted_at';
+    let query = supabase.from(table).select(columns).eq('owner_id', CRM_OWNER_UID).is('deleted_at', null).order('created_at', { ascending: false }).limit(limit);
     if (table === 'notes' && body.category) query = query.eq('category', text(body.category, 80));
     const { data, error } = await query;
     if (error) throw error;
