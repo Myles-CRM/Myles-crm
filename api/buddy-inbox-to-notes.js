@@ -4,6 +4,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const CRM_OWNER_UID = process.env.CRM_OWNER_UID || '';
 const BUDDY_INBOX_ACTION_TOKEN = process.env.BUDDY_INBOX_ACTION_TOKEN;
+const ALLOWED_HOST = 'zgbzjeiprratbyjnsbge.supabase.co';
 const REVIEWABLE_STATUSES = ['new', 'ready', 'metadata-only', 'reviewed'];
 const UNREVIEWED_STATUSES = ['new', 'ready', 'metadata-only'];
 
@@ -22,12 +23,23 @@ function requestToken(headers = {}) {
   return headerValue(headers, 'x-buddy-inbox-action-token') || headerValue(headers, 'x-buddy-inbox-token');
 }
 
+function validUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function projectConfigured() {
+  let parsed;
+  try { parsed = new URL(SUPABASE_URL); } catch { return false; }
+  return parsed.href === 'https://' + ALLOWED_HOST + '/' && validUuid(CRM_OWNER_UID);
+}
+
 function missingConfig() {
   const missing = [];
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
   if (!CRM_OWNER_UID) missing.push('CRM_OWNER_UID');
   if (!BUDDY_INBOX_ACTION_TOKEN) missing.push('BUDDY_INBOX_ACTION_TOKEN');
+  if (!projectConfigured()) missing.push('CRM project configuration');
   return missing;
 }
 
