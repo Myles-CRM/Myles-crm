@@ -8,9 +8,11 @@ begin;
 -- Fail closed if the known live shape has changed.
 do $$
 begin
-  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='title')
-    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='body')
-    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='id' and column_default like '%gen_random_uuid%') then
+  if (select count(*) from information_schema.columns where table_schema='public' and table_name='notes') <> 4
+    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='id' and data_type='uuid' and is_nullable='NO' and column_default like '%gen_random_uuid%')
+    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='title' and data_type='text' and is_nullable='NO')
+    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='body' and data_type='text' and is_nullable='YES')
+    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='notes' and column_name='created_at' and data_type='timestamp with time zone' and is_nullable='NO' and column_default like '%now()%') then
     raise exception 'Unexpected notes schema or id default; stop and review before migration';
   end if;
   if to_regclass('public.contacts') is not null or to_regclass('public.events') is not null then
