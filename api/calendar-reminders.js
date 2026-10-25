@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { tokenMatches } from '../lib/auth.js';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const CRM_ADMIN_TOKEN = process.env.CRM_ADMIN_TOKEN;
-const REMINDER_OWNER_ID = process.env.CRM_REMINDER_OWNER_ID || '00000000-0000-0000-0000-000000000001';
+const ALLOWED_HOST = 'zgbzjeiprratbyjnsbge.supabase.co';
+const REMINDER_OWNER_ID = process.env.CRM_OWNER_UID || '';
 
 function bodyOf(req) {
   if (typeof req.body === 'string') {
@@ -22,7 +23,9 @@ export default async function handler(req, res) {
   const authorization = String(req.headers.authorization || '');
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
   if (!tokenMatches(CRM_ADMIN_TOKEN, token)) return res.status(401).json({ error: 'Unauthorized' });
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'Server not configured' });
+  let parsed;
+  try { parsed = new URL(SUPABASE_URL); } catch { parsed = null; }
+  if (!parsed || parsed.href !== 'https://' + ALLOWED_HOST + '/' || !REMINDER_OWNER_ID || !SUPABASE_SERVICE_KEY) return res.status(503).json({ error: 'Server not configured' });
 
   const body = bodyOf(req);
   if (!body || !['replace', 'cancel'].includes(body.action)) return res.status(400).json({ error: 'Invalid action' });

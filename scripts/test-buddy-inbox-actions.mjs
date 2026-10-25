@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+process.env.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'service-key';
+process.env.CRM_OWNER_UID = 'a54d2b35-6388-44b5-b38c-a155682ab187';
 process.env.BUDDY_INBOX_ACTION_TOKEN = 'buddy-action-test-token';
 
 const source = await readFile(new URL('../api/buddy-inbox-to-notes.js', import.meta.url), 'utf8');
@@ -145,8 +146,8 @@ result = await run({
 assert.equal(result.res.statusCode, 200, 'Bearer auth should reach create_note action');
 assert.equal(result.res.body.ok, true, 'create_note should file selected emailed note text');
 assert.equal(bearerFake.state.notes.length, 1, 'create_note without Buddy override should insert the emailed note');
-assert.match(bearerFake.state.notes[0].content, /Text body 1/, 'filed note should use the selected email body');
-assert.match(bearerFake.state.notes[0].content, /Source email: Subject 1/, 'note should keep a source reference');
+assert.match(bearerFake.state.notes[0].body, /Text body 1/, 'filed note should use the selected email body');
+assert.match(bearerFake.state.notes[0].body, /Source email: Subject 1/, 'note should keep a source reference');
 
 const fake = createFakeSupabase(makeMessages(1));
 result = await run({
@@ -157,8 +158,8 @@ result = await run({
 assert.equal(result.res.body.ok, true, 'create_note with selected id should succeed');
 assert.equal(fake.state.notes.length, 1, 'first create_note should insert one note');
 assert.equal(fake.state.messages[0].status, 'noted', 'processed message should be marked noted');
-assert.match(fake.state.notes[0].content, /Text body 1/, 'note should come from Myles emailed note text');
-assert.match(fake.state.notes[0].content, /Source email: Subject 1/, 'note should keep a source reference');
+assert.match(fake.state.notes[0].body, /Text body 1/, 'note should come from Myles emailed note text');
+assert.match(fake.state.notes[0].body, /Source email: Subject 1/, 'note should keep a source reference');
 
 result = await run({
   method: 'POST',

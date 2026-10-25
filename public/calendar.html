@@ -144,6 +144,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Calendar cloud script -->
     <script>
@@ -176,11 +177,11 @@
       const nextMonthButton = document.getElementById('nextMonth');
       const todayButton = document.getElementById('todayButton');
 
-      const localStorageKey = 'myles-crm-calendar-events';
-      const calendarFeedsKey = 'myles-crm-calendar-feeds';
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const localStorageKey = window.CrmAuth.cacheKey('calendar-events');
+      const calendarFeedsKey = window.CrmAuth.cacheKey('calendar-feeds');
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudEventsCacheKey = window.CrmAuth.cacheKey('cloud-calendar');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
       const importRefreshHour = 5;
       const reminderEmailAddress = 'tacotrumpet001@gmail.com';
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -1289,10 +1290,13 @@
         renderContactOptions();
       }
 
-      eventDate.value = selectedDate;
-      eventEndDate.value = selectedDate;
-      renderCalendarFeeds();
-      refreshContacts().then(() => refreshEvents()).then(scheduleNextDailyImportRefresh);
+      window.CrmAuth.requireOwner().then((user) => {
+        if (!user) return;
+        eventDate.value = selectedDate;
+        eventEndDate.value = selectedDate;
+        renderCalendarFeeds();
+        return refreshContacts().then(() => refreshEvents()).then(scheduleNextDailyImportRefresh);
+      });
     </script>
     <!-- END: Calendar cloud script -->
   </body>

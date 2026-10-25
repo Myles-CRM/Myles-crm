@@ -70,6 +70,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Notes cloud script -->
     <script>
@@ -92,7 +93,7 @@
       const categoryTitle = document.getElementById('categoryTitle');
       const categoryEyebrow = document.getElementById('categoryEyebrow');
       const categoryHint = document.getElementById('categoryHint');
-      const notesCachePrefix = 'myles-crm-notes-cache-';
+      const notesCachePrefix = window.CrmAuth.cacheKey('notes-');
       let currentTab = 'homework';
       let currentModel = { version: 1, day: '', items: [] };
       let isDirty = false;
@@ -147,7 +148,7 @@
         saveNotesButton.disabled = true; setStatus('Saving checklist…');
         try {
           if (!window.supabase) throw new Error('Cloud is not available.');
-          const result = await window.supabase.from('notes').insert([{ category: tab, content: JSON.stringify(snapshot), created_by: 'Myles' }]);
+          const result = await window.supabase.from('notes').insert([{ owner_id: window.CRM_OWNER_UID, title: tab, body: JSON.stringify(snapshot) }]);
           if (result.error) throw result.error;
           if (localStorage.getItem(dirtyKey(tab)) === JSON.stringify(snapshot)) localStorage.removeItem(dirtyKey(tab));
           if (tab === currentTab) { isDirty = false; setStatus(snapshot.items.filter(function(item) { return !item.done; }).length + ' task(s) still to do. Saved to cloud.'); }
@@ -172,9 +173,9 @@
         let model = loadCachedChecklist(tab);
         const localDirty = Boolean(localStorage.getItem(dirtyKey(tab)));
         if (window.supabase && !localDirty) {
-          const result = await window.supabase.from('notes').select('*').eq('category', tab).is('deleted_at', null).order('created_at', { ascending: true });
+          const result = await window.supabase.from('notes').select('id, owner_id, title, body, created_at').eq('title', tab).order('created_at', { ascending: true });
           if (requestId !== loadSequence) return;
-          if (!result.error && result.data.length) model = parseChecklist(result.data[result.data.length - 1].content); else if (result.error) console.warn('Could not load cloud checklist', result.error);
+          if (!result.error && result.data.length) model = parseChecklist(result.data[result.data.length - 1].body); else if (result.error) console.warn('Could not load cloud checklist', result.error);
         }
         if (requestId !== loadSequence) return;
         const reset = resetIfNewDay(model); currentModel = model; cacheChecklist(tab, model); renderChecklist(); isDirty = reset; isLoaded = true; addChecklistForm.querySelector('input').disabled = false; addChecklistForm.querySelector('button').disabled = false; saveNotesButton.disabled = false;
@@ -184,7 +185,12 @@
       async function switchCategory(tab) { if (tab === currentTab) return; if (isDirty) await persistChecklist(); loadSequence += 1; currentTab = tab; await loadCloud(currentTab); }
       addChecklistForm.addEventListener('submit', async function(event) { event.preventDefault(); if (!isLoaded) return; const text = newChecklistItem.value.trim(); if (!text) return; currentModel.items.push({ id: crypto.randomUUID(), text: text, done: false }); newChecklistItem.value = ''; isDirty = true; renderChecklist(); await persistChecklist(); newChecklistItem.focus(); });
       saveNotesButton.addEventListener('click', persistChecklist);
-      renderTabs(); currentModel = newChecklist(); loadCloud(currentTab);
+      window.CrmAuth.requireOwner().then((user) => {
+        if (!user) return;
+        renderTabs();
+        currentModel = newChecklist();
+        return loadCloud(currentTab);
+      });
       window.setInterval(async function() { if (!isLoaded) return; if (resetIfNewDay(currentModel)) { renderChecklist(); isDirty = true; await persistChecklist(); } }, 60000);
     </script>
     <!-- END: Notes cloud script -->

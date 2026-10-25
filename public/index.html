@@ -77,6 +77,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Home dashboard script -->
     <script>
@@ -86,12 +87,12 @@
       const contactSummary = document.getElementById('contactSummary');
       const homeworkSummary = document.getElementById('homeworkSummary');
 
-      const localEventsKey = 'myles-crm-calendar-events';
-      const calendarFeedsKey = 'myles-crm-calendar-feeds';
-      const cloudEventsCacheKey = 'myles-crm-cloud-calendar-cache';
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
-      const homeworkCacheKey = 'myles-crm-notes-cache-homework';
+      const localEventsKey = window.CrmAuth.cacheKey('calendar-events');
+      const calendarFeedsKey = window.CrmAuth.cacheKey('calendar-feeds');
+      const cloudEventsCacheKey = window.CrmAuth.cacheKey('cloud-calendar');
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
+      const homeworkCacheKey = window.CrmAuth.cacheKey('notes-homework');
       const labelledEntryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
       const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -345,14 +346,13 @@
         const { data, error } = await window.supabase
           .from('notes')
           .select('*')
-          .eq('category', 'homework')
-          .is('deleted_at', null)
+          .eq('title', 'homework')
           .order('created_at', { ascending: true });
         if (error) {
           console.warn('Could not load homework notes', error);
           return localStorage.getItem(homeworkCacheKey) || '';
         }
-        const latest = data.length ? data[data.length - 1].content : '';
+        const latest = data.length ? data[data.length - 1].body : '';
         localStorage.setItem(homeworkCacheKey, latest);
         return latest;
       }
@@ -441,7 +441,7 @@
         }
       }
 
-      loadDashboard();
+      window.CrmAuth.requireOwner().then((user) => { if (user) loadDashboard(); });
     </script>
     <!-- END: Home dashboard script -->
   </body>

@@ -1,15 +1,14 @@
-const CACHE_NAME = 'myles-crm-offline-v7';
+const CACHE_NAME = 'myles-crm-static-v8';
 const CORE_ASSETS = [
   './',
-  './index.html',
-  './notes.html',
-  './contacts.html',
-  './calendar.html',
-  './buddy-inbox.html',
+  './login.html',
+  './auth-callback.html',
   './assets/style.css',
   './assets/common.js',
+  './assets/crm-auth.js',
   './manifest.webmanifest'
 ];
+const CACHEABLE_PATHS = new Set(CORE_ASSETS.map((asset) => new URL(asset, self.location.href).pathname));
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -31,40 +30,18 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isRuntimeConfig = requestUrl.pathname.endsWith('/runtime-config.js');
+  const isCacheableStatic = isSameOrigin && CACHEABLE_PATHS.has(requestUrl.pathname);
 
-  const request = event.request;
-  if (new URL(request.url).pathname.endsWith('/runtime-config.js')) {
-    event.respondWith(fetch(new Request(request, { cache: 'no-store' })));
-    return;
-  }
-
-  const acceptsHtml = request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html');
-
-  if (acceptsHtml) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(async () => {
-          return (await caches.match(request)) || caches.match('./index.html');
-        })
-    );
-    return;
-  }
+  // Never cache Supabase, API, Auth callback tokens, or user-specific responses.
+  if (!isCacheableStatic || isRuntimeConfig || requestUrl.pathname.startsWith('/api/')) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response && response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      });
-    })
+    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+      if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+      return response;
+    }))
   );
 });

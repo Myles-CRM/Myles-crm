@@ -123,6 +123,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="runtime-config.js"></script>
     <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
 
     <!-- START: Contacts cloud script -->
     <script>
@@ -142,8 +143,8 @@
       const emailFields = document.getElementById('emailFields');
       const addressFields = document.getElementById('addressFields');
 
-      const localContactsKey = 'myles-crm-contacts';
-      const cloudContactsCacheKey = 'myles-crm-cloud-contacts-cache';
+      const localContactsKey = window.CrmAuth.cacheKey('contacts');
+      const cloudContactsCacheKey = window.CrmAuth.cacheKey('cloud-contacts');
       const entryLabels = ['home', 'work', 'school', 'mobile', 'company', 'other'];
       let contacts = [];
       let selectedContactId = '';
@@ -718,8 +719,11 @@
       });
 
       search.addEventListener('input', renderContactList);
-      resetContactEditor();
-      refreshContacts();
+      window.CrmAuth.requireOwner().then((user) => {
+        if (!user) return;
+        resetContactEditor();
+        return refreshContacts();
+      });
     </script>
     <!-- END: Contacts cloud script -->
   </body>

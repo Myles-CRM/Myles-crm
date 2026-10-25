@@ -1,0 +1,4 @@
+-- Superseded migration draft.
+-- The live project inventory showed that contacts/events did not exist and notes uses title/body.
+-- Use supabase/notes-owner.sql after reviewing the live-schema guards and owner backfill.
+-- This file intentionally contains no executable SQL.

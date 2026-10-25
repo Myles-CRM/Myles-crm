@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Completing sign-in — Myles CRM</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header><h1>Myles CRM</h1></header>
+    <main>
+      <section class="card" aria-labelledby="callbackTitle">
+        <h2 id="callbackTitle">Completing sign-in</h2>
+        <p id="callbackStatus" role="status" aria-live="polite">Checking your link…</p>
+        <a href="login.html">Back to sign in</a>
+      </section>
+    </main>
+
+    <script>window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';</script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="runtime-config.js"></script>
+    <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
+    <script>
+      const status = document.getElementById('callbackStatus');
+      const next = new URLSearchParams(location.search).get('next');
+      window.CrmAuth.finishMagicLink(next).catch((error) => {
+        console.warn('CRM sign-in callback failed', error);
+        status.textContent = 'This link could not sign you in. Request a new link.';
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — Myles CRM</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header><h1>Myles CRM</h1></header>
+    <main>
+      <section class="card" aria-labelledby="loginTitle">
+        <h2 id="loginTitle">Sign in</h2>
+        <p>Enter the invited CRM email address. We'll send a one-time sign-in link.</p>
+        <form id="loginForm">
+          <label for="loginEmail">Email address</label>
+          <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+          <button id="loginButton" type="submit">Send sign-in link</button>
+        </form>
+        <p id="loginStatus" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script>window.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co/';</script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="runtime-config.js"></script>
+    <script src="assets/common.js"></script>
+    <script src="assets/crm-auth.js"></script>
+    <script>
+      const form = document.getElementById('loginForm');
+      const status = document.getElementById('loginStatus');
+      const button = document.getElementById('loginButton');
+      const next = new URLSearchParams(location.search).get('next');
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        status.textContent = 'Sending sign-in link…';
+        try {
+          await window.CrmAuth.sendMagicLink(form.elements.email.value, next);
+          status.textContent = 'If this address is invited, check its inbox for a sign-in link.';
+        } catch (error) {
+          console.warn('CRM sign-in request failed', error);
+          status.textContent = 'Could not send a link. Check the CRM configuration or try again.';
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
