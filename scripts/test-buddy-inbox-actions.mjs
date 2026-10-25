@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+process.env.SUPABASE_URL = 'https://zgbzjeiprratbyjnsbge.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'service-key';
+process.env.CRM_OWNER_UID = 'a54d2b35-6388-44b5-b38c-a155682ab187';
 process.env.BUDDY_INBOX_ACTION_TOKEN = 'buddy-action-test-token';
 
 const source = await readFile(new URL('../api/buddy-inbox-to-notes.js', import.meta.url), 'utf8');

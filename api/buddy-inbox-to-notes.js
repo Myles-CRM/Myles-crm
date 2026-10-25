@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const CRM_OWNER_UID = process.env.CRM_OWNER_UID || '';
 const BUDDY_INBOX_ACTION_TOKEN = process.env.BUDDY_INBOX_ACTION_TOKEN;
 const REVIEWABLE_STATUSES = ['new', 'ready', 'metadata-only', 'reviewed'];
 const UNREVIEWED_STATUSES = ['new', 'ready', 'metadata-only'];
@@ -25,6 +26,7 @@ function missingConfig() {
   const missing = [];
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');
   if (!SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
+  if (!CRM_OWNER_UID) missing.push('CRM_OWNER_UID');
   if (!BUDDY_INBOX_ACTION_TOKEN) missing.push('BUDDY_INBOX_ACTION_TOKEN');
   return missing;
 }
@@ -139,7 +141,7 @@ async function createNoteFromMessages(supabase, req) {
     const content = buildFiledNote(messages, req.body?.noteContent);
     const { data: note, error: noteError } = await supabase
       .from('notes')
-      .insert([{ category: req.body?.category || 'general', content, created_by: 'Buddy' }])
+      .insert([{ owner_id: CRM_OWNER_UID, category: req.body?.category || 'general', content, created_by: 'Buddy' }])
       .select('id')
       .single();
 

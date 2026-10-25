@@ -51,7 +51,7 @@ function rowForAction(action, data) {
   if (action === 'add_note') {
     const category = text(data.category, 80);
     const content = text(data.content, 50000);
-    if (!['homework', 'guitar', 'trumpet', 'bass', 'drums', 'piano', 'general'].includes(category) || !content) throw new Error('valid category and content are required');
+    if (!['homework', 'guitar', 'trumpet', 'bass', 'double-bass', 'drums', 'piano', 'general'].includes(category) || !content) throw new Error('valid category and content are required');
     return { table: 'notes', row: { owner_id: CRM_OWNER_UID, category, content, created_by: 'Buddy' } };
   }
   return null;
@@ -64,6 +64,7 @@ export default async function handler(req, res) {
 
   let body = req.body || {};
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { return reply(res, 400, { ok: false, error: 'Invalid JSON' }); } }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return reply(res, 400, { ok: false, error: 'Request body must be an object' });
   const action = String(body.action || '');
   if (!ACTIONS.has(action)) return reply(res, 400, { ok: false, error: 'Unsupported action' });
 
