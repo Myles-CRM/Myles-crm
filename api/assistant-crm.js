@@ -35,6 +35,7 @@ function configured() {
 }
 
 function rowForAction(action, data) {
+  if (!action.startsWith('add_')) return null;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('data must be an object');
   if (action === 'add_contact') {
     const first_name = text(data?.first_name, 120);
