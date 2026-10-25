@@ -4,6 +4,7 @@ import { tokenMatches } from '../lib/auth.js';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const CRM_ADMIN_TOKEN = process.env.CRM_ADMIN_TOKEN;
+const LEGACY_ADMIN_ENABLED = process.env.CRM_LEGACY_ADMIN_ENABLED === 'true';
 
 function response(res, status, body) {
   res.setHeader('Cache-Control', 'no-store');
@@ -15,6 +16,8 @@ export default async function handler(req, res) {
     res.setHeader('Allow', 'GET');
     return response(res, 405, { ok: false, error: 'Method Not Allowed' });
   }
+
+  if (!LEGACY_ADMIN_ENABLED) return response(res, 410, { ok: false, error: 'Legacy inbox route disabled' });
 
   const auth = String(req.headers.authorization || '');
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';

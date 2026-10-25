@@ -346,14 +346,13 @@
         const { data, error } = await window.supabase
           .from('notes')
           .select('*')
-          .eq('category', 'homework')
-          .is('deleted_at', null)
+          .eq('title', 'homework')
           .order('created_at', { ascending: true });
         if (error) {
           console.warn('Could not load homework notes', error);
           return localStorage.getItem(homeworkCacheKey) || '';
         }
-        const latest = data.length ? data[data.length - 1].content : '';
+        const latest = data.length ? data[data.length - 1].body : '';
         localStorage.setItem(homeworkCacheKey, latest);
         return latest;
       }

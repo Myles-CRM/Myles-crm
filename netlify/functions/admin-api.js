@@ -33,6 +33,8 @@ exports.handler = async (event) => {
   });
 
   try {
+    if (process.env.CRM_LEGACY_ADMIN_ENABLED !== 'true') return bad(410, 'Legacy admin route disabled');
+
     // GET health check → 405 per requirements
     if (event.httpMethod === 'GET') {
       return bad(405, 'Method not allowed');

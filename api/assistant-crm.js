@@ -52,7 +52,7 @@ function rowForAction(action, data) {
     const category = text(data.category, 80);
     const content = text(data.content, 50000);
     if (!['homework', 'guitar', 'trumpet', 'bass', 'double-bass', 'drums', 'piano', 'general'].includes(category) || !content) throw new Error('valid category and content are required');
-    return { table: 'notes', row: { owner_id: CRM_OWNER_UID, category, content, created_by: 'Buddy' } };
+    return { table: 'notes', row: { owner_id: CRM_OWNER_UID, title: category, body: content } };
   }
   return null;
 }
@@ -96,9 +96,10 @@ export default async function handler(req, res) {
       ? 'id, owner_id, first_name, last_name, phone, email, address, profession, notes, created_by, created_at, updated_at, deleted_at'
       : table === 'events'
         ? 'id, owner_id, title, date, time, location, created_by, created_at, updated_at, deleted_at'
-        : 'id, owner_id, category, content, created_by, created_at, deleted_at';
-    let query = supabase.from(table).select(columns).eq('owner_id', CRM_OWNER_UID).is('deleted_at', null).order('created_at', { ascending: false }).limit(limit);
-    if (table === 'notes' && body.category) query = query.eq('category', text(body.category, 80));
+        : 'id, owner_id, title, body, created_at';
+    let query = supabase.from(table).select(columns).eq('owner_id', CRM_OWNER_UID).order('created_at', { ascending: false }).limit(limit);
+    if (table !== 'notes') query = query.is('deleted_at', null);
+    if (table === 'notes' && body.category) query = query.eq('title', text(body.category, 80));
     const { data, error } = await query;
     if (error) throw error;
     console.info('assistant_crm_action', { actor: 'Buddy', action, count: data?.length || 0 });

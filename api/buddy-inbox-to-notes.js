@@ -153,7 +153,7 @@ async function createNoteFromMessages(supabase, req) {
     const content = buildFiledNote(messages, req.body?.noteContent);
     const { data: note, error: noteError } = await supabase
       .from('notes')
-      .insert([{ owner_id: CRM_OWNER_UID, category: req.body?.category || 'general', content, created_by: 'Buddy' }])
+      .insert([{ owner_id: CRM_OWNER_UID, title: req.body?.category || 'general', body: content }])
       .select('id')
       .single();
 

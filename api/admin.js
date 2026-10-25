@@ -4,6 +4,7 @@ import { tokenMatches } from '../lib/auth.js';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const CRM_ADMIN_TOKEN = process.env.CRM_ADMIN_TOKEN;
+const LEGACY_ADMIN_ENABLED = process.env.CRM_LEGACY_ADMIN_ENABLED === 'true';
 function allow(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -15,6 +16,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') { allow(res); res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method Not Allowed' }); }
 
   allow(res);
+  if (!LEGACY_ADMIN_ENABLED) return res.status(410).json({ error: 'Legacy admin route disabled' });
 
   const auth = (req.headers.authorization || '').toString();
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
